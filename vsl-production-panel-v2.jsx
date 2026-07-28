@@ -1224,6 +1224,14 @@ const TEST_STATUS = {
 };
 const TEST_STATUS_ORDER = ["planejado", "rodando", "concluido"];
 
+// data no formato ddmmaa para a nomenclatura
+function ddmmaa(dateObj) {
+  return `${String(dateObj.getDate()).padStart(2, "0")}${String(dateObj.getMonth() + 1).padStart(2, "0")}${String(dateObj.getFullYear()).slice(2)}`;
+}
+
+// Nomenclatura padrão do teste: junta produto (funil) + corpo (versão) + lead(s) +
+// quando rodou (início) e quando parou (fim, entra ao encerrar).
+// Ex.: TESTE_HFTC_V2_LEAD01-02_270726-280726
 function testName(test, items, experts) {
   const funil = slug(funilName(experts, test.funilId)) || "FUNIL";
   const leads = (test.leadIds || [])
@@ -1232,11 +1240,10 @@ function testName(test, items, experts) {
     .map((l) => l.leadNum || "?")
     .sort();
   const leadPart = leads.length ? `LEAD${leads.join("-")}` : "LEAD?";
-  const d = test.dataInicio ? new Date(test.dataInicio + "T00:00:00") : new Date();
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const aa = String(d.getFullYear()).slice(2);
-  return `TESTE_${funil}_V${test.corpoVersao || "?"}_${leadPart}_${dd}${mm}${aa}`;
+  const ini = ddmmaa(test.dataInicio ? new Date(test.dataInicio + "T00:00:00") : new Date());
+  const base = `TESTE_${funil}_V${test.corpoVersao || "?"}_${leadPart}_${ini}`;
+  // quando parou de rodar
+  return test.dataFim ? `${base}-${ddmmaa(new Date(test.dataFim + "T00:00:00"))}` : base;
 }
 
 // Nome que realmente vale: o que o Gabriel digitou (para casar com o VTurb) ou, se vazio, o automático.
@@ -1353,11 +1360,18 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
                 className="w-full bg-transparent outline-none text-[13px] font-bold"
                 style={{ color: C.primary, fontFamily: "ui-monospace, monospace" }}
               />
-              <p className="text-[10.5px] mt-2" style={{ color: C.text }}>
-                Nome sugerido automaticamente — <b>você pode editar</b> para ficar igual ao que o Gabriel usa no VTurb.
-                Use exatamente este nome no VTurb e na API/automação: é ele que liga a métrica ao teste.
-              </p>
               <div className="mt-2"><CopyName big name={form.nomeManual && form.nomeManual.trim() ? form.nomeManual.trim() : autoNome} /></div>
+              <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style={{ color: C.text }}>
+                <span>🏷️ <b>Produto</b>: funil</span>
+                <span>🎬 <b>Corpo</b>: versão</span>
+                <span>⚡ <b>Lead(s)</b> em teste</span>
+                <span>▶️ <b>Quando rodou</b>: data de início</span>
+                <span>⏹️ <b>Quando parou</b>: entra ao clicar "Encerrar teste"</span>
+              </div>
+              <p className="text-[10.5px] mt-2" style={{ color: C.text }}>
+                O nome já junta tudo isso automaticamente. <b>Você pode editar</b> para casar com o que o Gabriel usa no VTurb —
+                e é esse mesmo nome que deve ir no VTurb e na API para a métrica bater.
+              </p>
             </div>
             <LinkField label="Link do player / teste no VTurb" Icon={ExternalLink} value={form.linkVturb} onChange={set("linkVturb")} />
           </Section>
