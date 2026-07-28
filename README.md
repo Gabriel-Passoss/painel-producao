@@ -1,6 +1,6 @@
 # Painel de Produção — VSL / Lead / Upsell / Downsell
 
-Painel de controle da produção de VSLs da **PAZ Marketing Digital**. Centraliza o que já foi
+Painel de controle da produção de VSLs. Centraliza o que já foi
 produzido, o que está em produção, o que falta produzir e o que está rodando agora em cada funil.
 Os dados ficam num servidor e são **compartilhados** — todo mundo que abre o link vê a mesma base,
 que se atualiza sozinha a cada 15 segundos.
