@@ -26,7 +26,7 @@ const C = {
 const FONT = "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif";
 
 const STATUS = {
-  a_editar: { label: "A editar", color: "#8B8B8B", Icon: Clock },
+  a_editar: { label: "A editar", color: "#E5383B", Icon: Clock },
   em_edicao: { label: "Em edição", color: C.gold, Icon: CircleDot },
   editado: { label: "Editado", color: C.ok, Icon: CheckCircle2 },
 };
@@ -1036,6 +1036,25 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
 const EMPTY_SLOTS = { leads: [], corpo: null, upsell1: null, downsell1: null, upsell2: null, downsell2: null };
 const SLOT_LABEL = { leads: "Lead", corpo: "Corpo VSL", upsell1: "Upsell 1", downsell1: "Downsell 1", upsell2: "Upsell 2", downsell2: "Downsell 2" };
 
+// "quanto tempo rodou" em formato curto
+function fmtDur(ms) {
+  if (ms == null || ms < 0) return null;
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "menos de 1 min";
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h${min % 60 ? ` ${min % 60}min` : ""}`;
+  const dias = Math.floor(h / 24);
+  return `${dias} ${dias === 1 ? "dia" : "dias"}${h % 24 ? ` ${h % 24}h` : ""}`;
+}
+
+// classifica cada registro do histórico
+function logAction(l) {
+  if (l.fromId && l.toId) return { key: "sub", label: "Substituído", color: C.gold };
+  if (l.toId) return { key: "add", label: "Adicionado", color: C.ok };
+  return { key: "rem", label: "Removido", color: C.accent };
+}
+
 function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, setSlotLog }) {
   const editado = items.filter((i) => i.status === "editado");
   const [histOpen, setHistOpen] = useState({});
@@ -1069,6 +1088,18 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
     });
   };
 
+  // por quanto tempo o item que saiu (fromId) ficou naquele slot
+  const runtimeFor = (arr, idx) => {
+    const e = arr[idx];
+    if (!e.fromId) return null;
+    for (let j = idx + 1; j < arr.length; j++) {
+      if (arr[j].slot === e.slot && arr[j].toId === e.fromId) {
+        return new Date(e.date) - new Date(arr[j].date);
+      }
+    }
+    return null; // já estava no ar antes do registro começar
+  };
+
   const renderHistory = (funilId) => {
     const entries = (slotLog || []).filter((l) => l.funilId === funilId);
     if (entries.length === 0) return null;
@@ -1080,24 +1111,44 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
           className="flex items-center gap-1.5 text-[11px] font-semibold"
           style={{ color: "#6B6B6B" }}
         >
-          <History size={11} /> Histórico de trocas ({entries.length})
+          <History size={11} /> Registro de alterações ({entries.length})
           {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </button>
         {open && (
           <div className="mt-2 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.cardBorder}`, background: "rgba(255,255,255,0.015)" }}>
-            {entries.slice(0, 30).map((l) => {
+            {entries.slice(0, 40).map((l, idx) => {
               const from = items.find((i) => i.id === l.fromId);
               const to = items.find((i) => i.id === l.toId);
               const d = new Date(l.date);
+              const act = logAction(l);
+              const dur = fmtDur(runtimeFor(entries, idx));
               return (
-                <div key={l.id} className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", color: C.text }}>
-                  <span className="shrink-0" style={{ color: "#5C5C5C" }}>
+                <div key={l.id} className="flex items-start gap-2.5 px-3 py-2 text-[11px]" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", color: C.text }}>
+                  <span className="shrink-0 tabular-nums pt-0.5" style={{ color: "#5C5C5C", minWidth: 92 }}>
                     {d.toLocaleDateString("pt-BR")} {d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                   </span>
-                  <span className="font-semibold shrink-0" style={{ color: C.primary }}>{SLOT_LABEL[l.slot]}</span>
-                  <span className="truncate">{from ? itemLabel(from, experts) : "vazio"}</span>
-                  <ArrowRightLeft size={10} color={C.accent} className="shrink-0" />
-                  <span className="truncate" style={{ color: to ? C.primary : "#5C5C5C" }}>{to ? itemLabel(to, experts) : "removido"}</span>
+                  <span className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-full text-[9.5px] font-bold uppercase tracking-wide" style={{ color: act.color, background: `${act.color}18`, border: `1px solid ${act.color}45` }}>
+                    {act.label}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="leading-snug">
+                      <span className="font-semibold" style={{ color: "#7B7B7B" }}>{SLOT_LABEL[l.slot]}: </span>
+                      {act.key === "add" && <span style={{ color: C.primary }}>{itemLabel(to, experts)}</span>}
+                      {act.key === "rem" && <span style={{ color: C.primary }}>{itemLabel(from, experts)}</span>}
+                      {act.key === "sub" && (
+                        <>
+                          <span style={{ color: "#8B8B8B" }}>{itemLabel(from, experts)}</span>
+                          <span style={{ color: act.color }}> → </span>
+                          <span style={{ color: C.primary }}>{itemLabel(to, experts)}</span>
+                        </>
+                      )}
+                    </p>
+                    {(act.key === "rem" || act.key === "sub") && (
+                      <p className="text-[10px] mt-0.5" style={{ color: "#5C5C5C" }}>
+                        {dur ? `ficou no ar por ${dur}` : "estava no ar (início não registrado)"}
+                      </p>
+                    )}
+                  </div>
                 </div>
               );
             })}
