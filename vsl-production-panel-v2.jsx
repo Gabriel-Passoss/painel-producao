@@ -1188,6 +1188,16 @@ function testName(test, items, experts) {
   return `TESTE_${funil}_V${test.corpoVersao || "?"}_${leadPart}_${dd}${mm}${aa}`;
 }
 
+// Nome que realmente vale: o que o Gabriel digitou (para casar com o VTurb) ou, se vazio, o automático.
+function effectiveTestName(test, items, experts) {
+  return (test.nomeManual && test.nomeManual.trim()) || testName(test, items, experts);
+}
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 function TestStatusBadge({ status }) {
   const s = TEST_STATUS[status] || TEST_STATUS.planejado;
   const Icon = s.Icon;
@@ -1201,11 +1211,12 @@ function TestStatusBadge({ status }) {
 function TesteModal({ initial, experts, items, onSave, onClose }) {
   const [form, setForm] = useState({
     funilId: "", corpoVersao: "", leadIds: [], split: "90 / 5 / 5",
-    solicitante: "", linkVturb: "", status: "planejado",
+    solicitante: "", linkVturb: "", status: "planejado", nomeManual: "",
     dataInicio: "", dataFim: "", obs: "",
     ...initial,
   });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const autoNome = testName(form, items, experts);
 
   const allFunis = experts.flatMap((ex) => ex.funis.map((f) => ({ ...f, expertName: ex.name, expertId: ex.id })));
   const funil = allFunis.find((f) => f.id === form.funilId);
@@ -1271,11 +1282,31 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
 
           <Section label="Rastreamento">
             <div className="rounded-xl p-3 mb-3" style={{ background: C.accentSoft, border: `1px solid ${C.accentBorder}` }}>
-              <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: C.accent }}>Nome do teste</p>
-              <CopyName big name={testName(form, items, experts)} />
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: C.accent }}>Nome do teste</p>
+                {form.nomeManual && form.nomeManual.trim() && form.nomeManual.trim() !== autoNome && (
+                  <button
+                    onClick={() => setForm((f) => ({ ...f, nomeManual: "" }))}
+                    className="text-[10px] font-semibold"
+                    style={{ color: C.text }}
+                    title="Voltar para o nome gerado automaticamente"
+                  >
+                    usar sugestão automática
+                  </button>
+                )}
+              </div>
+              <input
+                value={form.nomeManual || ""}
+                onChange={set("nomeManual")}
+                placeholder={autoNome}
+                className="w-full bg-transparent outline-none text-[13px] font-bold"
+                style={{ color: C.primary, fontFamily: "ui-monospace, monospace" }}
+              />
               <p className="text-[10.5px] mt-2" style={{ color: C.text }}>
-                Use exatamente este nome no VTurb e na API/automação — é ele que liga a métrica ao teste.
+                Nome sugerido automaticamente — <b>você pode editar</b> para ficar igual ao que o Gabriel usa no VTurb.
+                Use exatamente este nome no VTurb e na API/automação: é ele que liga a métrica ao teste.
               </p>
+              <div className="mt-2"><CopyName big name={form.nomeManual && form.nomeManual.trim() ? form.nomeManual.trim() : autoNome} /></div>
             </div>
             <LinkField label="Link do player / teste no VTurb" Icon={ExternalLink} value={form.linkVturb} onChange={set("linkVturb")} />
           </Section>
@@ -1311,7 +1342,7 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
   );
 }
 
-function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete }) {
+function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate }) {
   const counts = { planejado: 0, rodando: 0, concluido: 0 };
   (tests || []).forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
   const sorted = [...(tests || [])].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
@@ -1319,8 +1350,9 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete }) {
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-        <p className="text-[12px]" style={{ color: "#6B6B6B" }}>
+        <p className="text-[12px] max-w-[560px]" style={{ color: "#6B6B6B" }}>
           Registro central de testes de lead — o mesmo nome vai no VTurb e na API, para as métricas baterem.
+          Ao <b style={{ color: C.text }}>desativar um teste no VTurb, clique em "Encerrar teste" aqui também</b> para marcar que parou.
         </p>
         <button onClick={onAdd} className="flex items-center gap-1.5 text-[12.5px] font-bold px-4 py-2 rounded-full" style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 6px 18px -6px ${C.glow}` }}>
           <Plus size={14} /> Novo teste
@@ -1355,13 +1387,43 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete }) {
               <div key={t.id} className="group rounded-xl p-3.5" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
                 <div className="flex items-center gap-2 flex-wrap mb-2">
                   <FlaskConical size={14} color={C.accent} />
-                  <CopyName big name={testName(t, items, experts)} />
+                  <CopyName big name={effectiveTestName(t, items, experts)} />
                   <TestStatusBadge status={t.status} />
                   <span className="flex-1" />
                   {t.linkVturb && (
                     <a href={t.linkVturb} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] hover:underline" style={{ color: C.text }}>
                       <ExternalLink size={12} color={C.accent} /> VTurb
                     </a>
+                  )}
+                  {/* Botões de ciclo de vida: iniciar carimba a data de início; encerrar carimba a data de fim (não dá pra saber antes) */}
+                  {t.status !== "rodando" && t.status !== "concluido" && (
+                    <button
+                      onClick={() => onUpdate(t.id, { status: "rodando", dataInicio: t.dataInicio || todayISO() })}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full"
+                      style={{ color: C.gold, background: `${C.gold}18`, border: `1px solid ${C.gold}55` }}
+                    >
+                      <Radio size={11} /> Iniciar
+                    </button>
+                  )}
+                  {t.status === "rodando" && (
+                    <button
+                      onClick={() => onUpdate(t.id, { status: "concluido", dataFim: todayISO() })}
+                      className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full"
+                      style={{ color: C.accent, background: C.accentSoft, border: `1px solid ${C.accentBorder}` }}
+                      title="Encerra o teste e carimba a data de hoje como fim"
+                    >
+                      <CheckCircle2 size={11} /> Encerrar teste
+                    </button>
+                  )}
+                  {t.status === "concluido" && (
+                    <button
+                      onClick={() => onUpdate(t.id, { status: "rodando", dataFim: "" })}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                      style={{ color: C.text, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
+                      title="Reabrir o teste (voltar para rodando)"
+                    >
+                      <Radio size={11} /> Reabrir
+                    </button>
                   )}
                   <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => onEdit(t)} className="p-1 rounded-md hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
@@ -1373,12 +1435,11 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete }) {
                   <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum}`).join(" vs ") : "leads não selecionadas"}</span>
                   {t.split && <span>tráfego {t.split}</span>}
                   {t.solicitante && <span>pedido por {t.solicitante}</span>}
-                  {(t.dataInicio || t.dataFim) && (
-                    <span style={{ color: "#5C5C5C" }}>
-                      {t.dataInicio ? new Date(t.dataInicio + "T00:00:00").toLocaleDateString("pt-BR") : ""}
-                      {t.dataInicio && t.dataFim ? " → " : ""}
-                      {t.dataFim ? new Date(t.dataFim + "T00:00:00").toLocaleDateString("pt-BR") : ""}
-                    </span>
+                  {t.dataInicio && (
+                    <span style={{ color: "#5C5C5C" }}>iniciou {new Date(t.dataInicio + "T00:00:00").toLocaleDateString("pt-BR")}</span>
+                  )}
+                  {t.dataFim && (
+                    <span style={{ color: "#5C5C5C" }}>· encerrou {new Date(t.dataFim + "T00:00:00").toLocaleDateString("pt-BR")}</span>
                   )}
                 </div>
                 {t.obs && <p className="text-[11px] italic mt-1.5" style={{ color: "#6B6B6B" }}>{t.obs}</p>}
@@ -1559,6 +1620,7 @@ export default function VSLProductionPanel() {
     setTestModal(null);
   };
   const removeTest = (id) => setTests((prev) => prev.filter((t) => t.id !== id));
+  const updateTest = (id, patch) => setTests((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
 
   const saveExpert = (ex) => {
     setExperts((prev) => (prev.some((p) => p.id === ex.id) ? prev.map((p) => (p.id === ex.id ? ex : p)) : [...prev, ex]));
@@ -1708,7 +1770,7 @@ export default function VSLProductionPanel() {
           ) : tab === "funil" ? (
             <FunilAtualTab experts={experts} items={items} funilState={funilState} setFunilState={setFunilState} slotLog={slotLog} setSlotLog={setSlotLog} />
           ) : (
-            <TestesTab tests={tests} items={items} experts={experts} onAdd={() => setTestModal({})} onEdit={setTestModal} onDelete={removeTest} />
+            <TestesTab tests={tests} items={items} experts={experts} onAdd={() => setTestModal({})} onEdit={setTestModal} onDelete={removeTest} onUpdate={updateTest} />
           )}
         </main>
       </div>
