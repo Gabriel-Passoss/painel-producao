@@ -1268,7 +1268,7 @@ function TestStatusBadge({ status }) {
 
 function TesteModal({ initial, experts, items, onSave, onClose }) {
   const [form, setForm] = useState({
-    funilId: "", corpoVersao: "", leadIds: [], split: "90 / 5 / 5",
+    funilId: "", corpoVersao: "", leadIds: [],
     solicitante: "", linkVturb: "", status: "planejado", nomeManual: "",
     dataInicio: "", dataFim: "", obs: "",
     ...initial,
@@ -1278,7 +1278,10 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
 
   const allFunis = experts.flatMap((ex) => ex.funis.map((f) => ({ ...f, expertName: ex.name, expertId: ex.id })));
   const funil = allFunis.find((f) => f.id === form.funilId);
-  const leadsDoFunil = items.filter((i) => i.type === "lead" && i.funilId === form.funilId && (!form.corpoVersao || i.versao === form.corpoVersao));
+  // versões de corpo já cadastradas para o funil (para selecionar)
+  const versoesCorpo = [...new Set(items.filter((i) => i.type === "vsl" && i.funilId === form.funilId).map((c) => c.versao).filter(Boolean))].sort();
+  // todas as leads do funil — cada uma mostra sua versão, para escolher qual lead está rodando
+  const leadsDoFunil = items.filter((i) => i.type === "lead" && i.funilId === form.funilId);
 
   const toggleLead = (id) =>
     setForm((f) => ({ ...f, leadIds: f.leadIds.includes(id) ? f.leadIds.filter((x) => x !== id) : [...f.leadIds, id] }));
@@ -1306,36 +1309,43 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
                 </select>
               </Field>
               <Field label="Versão do corpo">
-                <input style={inputStyle} value={form.corpoVersao} onChange={set("corpoVersao")} placeholder="2" />
+                {versoesCorpo.length > 0 ? (
+                  <select style={inputStyle} value={form.corpoVersao} onChange={set("corpoVersao")}>
+                    <option value="">selecione</option>
+                    {versoesCorpo.map((v) => <option key={v} value={v}>V{v}</option>)}
+                  </select>
+                ) : (
+                  <input style={inputStyle} value={form.corpoVersao} onChange={set("corpoVersao")} placeholder={form.funilId ? "nenhum corpo cadastrado — digite" : "selecione o funil"} />
+                )}
               </Field>
             </div>
           </Section>
 
-          <Section label="Leads em teste">
+          <Section label="Lead(s) em teste">
             {!form.funilId ? (
               <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>selecione um funil primeiro</p>
             ) : leadsDoFunil.length === 0 ? (
-              <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>nenhuma lead cadastrada para esse funil{form.corpoVersao ? ` na V${form.corpoVersao}` : ""}</p>
+              <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>nenhuma lead cadastrada para esse funil — cadastre na aba Produção</p>
             ) : (
-              <div className="flex flex-col gap-1 mb-2">
-                {leadsDoFunil.map((l) => (
-                  <button
-                    key={l.id}
-                    onClick={() => toggleLead(l.id)}
-                    className="flex items-center justify-between text-[12px] px-3 py-2 rounded-xl text-left"
-                    style={form.leadIds.includes(l.id)
-                      ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }
-                      : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
-                  >
-                    <span>Lead #{l.leadNum} V{l.versao} {l.editor ? `· ${l.editor}` : ""}</span>
-                    {form.leadIds.includes(l.id) && <CheckCircle2 size={13} />}
-                  </button>
-                ))}
-              </div>
+              <>
+                <p className="text-[10.5px] mb-1.5" style={{ color: "#5C5C5C" }}>Marque a versão da lead que está rodando (pode marcar mais de uma para A/B):</p>
+                <div className="flex flex-col gap-1">
+                  {leadsDoFunil.map((l) => (
+                    <button
+                      key={l.id}
+                      onClick={() => toggleLead(l.id)}
+                      className="flex items-center justify-between text-[12px] px-3 py-2 rounded-xl text-left"
+                      style={form.leadIds.includes(l.id)
+                        ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }
+                        : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                    >
+                      <span>Lead #{l.leadNum} · <b>V{l.versao}</b>{l.editor ? ` · ${l.editor}` : ""}</span>
+                      {form.leadIds.includes(l.id) && <CheckCircle2 size={13} />}
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
-            <Field label="Divisão de tráfego (VSL principal / leads)">
-              <input style={inputStyle} value={form.split} onChange={set("split")} placeholder="90 / 5 / 5" />
-            </Field>
           </Section>
 
           <Section label="Rastreamento">
@@ -1386,9 +1396,17 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
               </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Início"><input type="date" style={inputStyle} value={form.dataInicio} onChange={set("dataInicio")} /></Field>
-              <Field label="Fim"><input type="date" style={inputStyle} value={form.dataFim} onChange={set("dataFim")} /></Field>
+              <Field label="Início (quando começou a rodar)"><input type="date" style={inputStyle} value={form.dataInicio} onChange={set("dataInicio")} /></Field>
+              <Field label="Fim (quando parou)"><input type="date" style={inputStyle} value={form.dataFim} onChange={set("dataFim")} /></Field>
             </div>
+            {form.dataInicio && !form.dataFim && (
+              <div className="flex items-start gap-1.5 -mt-1 mb-3 px-2.5 py-2 rounded-lg" style={{ background: `${C.gold}12`, border: `1px solid ${C.gold}40` }}>
+                <Clock size={12} color={C.gold} className="mt-0.5 shrink-0" />
+                <p className="text-[10.5px]" style={{ color: C.gold }}>
+                  Teste em andamento — <b>deixe o Fim em branco enquanto roda</b> e volte para preencher (ou clique em "Encerrar teste") quando parar.
+                </p>
+              </div>
+            )}
             <Field label="Observações / resultado">
               <input style={inputStyle} value={form.obs} onChange={set("obs")} placeholder="ex: lead 02 venceu, CTR 12% maior" />
             </Field>
@@ -1497,8 +1515,7 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
                 </div>
                 <div className="flex items-center gap-3 flex-wrap text-[11.5px]" style={{ color: C.text }}>
                   <span className="font-semibold" style={{ color: C.primary }}>{funilName(experts, t.funilId) || "funil?"} · V{t.corpoVersao || "?"}</span>
-                  <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum}`).join(" vs ") : "leads não selecionadas"}</span>
-                  {t.split && <span>tráfego {t.split}</span>}
+                  <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum} V${l.versao}`).join(" vs ") : "leads não selecionadas"}</span>
                   {t.solicitante && <span>pedido por {t.solicitante}</span>}
                   {t.dataInicio && (
                     <span style={{ color: "#5C5C5C" }}>iniciou {new Date(t.dataInicio + "T00:00:00").toLocaleDateString("pt-BR")}</span>
@@ -1507,6 +1524,13 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
                     <span style={{ color: "#5C5C5C" }}>· encerrou {new Date(t.dataFim + "T00:00:00").toLocaleDateString("pt-BR")}</span>
                   )}
                 </div>
+                {/* Lembrete: começou mas ainda não tem data de fim */}
+                {t.dataInicio && !t.dataFim && (
+                  <div className="inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-full" style={{ background: `${C.gold}14`, border: `1px solid ${C.gold}45` }}>
+                    <Clock size={11} color={C.gold} />
+                    <span className="text-[10.5px] font-semibold" style={{ color: C.gold }}>Falta marcar quando parou — clique em "Encerrar teste" ao finalizar</span>
+                  </div>
+                )}
                 {t.obs && <p className="text-[11px] italic mt-1.5" style={{ color: "#6B6B6B" }}>{t.obs}</p>}
               </div>
             );
