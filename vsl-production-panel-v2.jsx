@@ -1643,12 +1643,30 @@ export default function VSLProductionPanel() {
   const [funilState, setFunilState, funilReady] = useStorage("vslpanel:funilstate", () => ({}));
   const [slotLog, setSlotLog, slotLogReady] = useStorage("vslpanel:slotlog", () => []);
   const [tests, setTests, testsReady] = useStorage("vslpanel:tests", () => []);
+  const [notifs, setNotifs, notifsReady] = useStorage("vslpanel:notifications", () => []);
   const [tab, setTab] = useState("dashboard");
   const [modal, setModal] = useState(null);
   const [testModal, setTestModal] = useState(null);
   const [expertModal, setExpertModal] = useState(null);
   const [navOpen, setNavOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [lastSeen, setLastSeen] = useState(() => {
+    try { return Number(localStorage.getItem("vslpanel:notifSeen") || 0); } catch (e) { return 0; }
+  });
+
+  const pushNotif = (text) =>
+    setNotifs((prev) => [{ id: uid(), date: new Date().toISOString(), text }, ...(prev || [])].slice(0, 60));
+
+  const unseenCount = (notifs || []).filter((n) => new Date(n.date).getTime() > lastSeen).length;
+  const openNotifs = () => {
+    setNotifOpen((o) => !o);
+    if (!notifOpen) {
+      const now = Date.now();
+      setLastSeen(now);
+      try { localStorage.setItem("vslpanel:notifSeen", String(now)); } catch (e) {}
+    }
+  };
 
   const blank = () => ({
     id: null, type: "vsl", expertId: "", funilId: "", produto: "", versao: "1",
@@ -1667,11 +1685,19 @@ export default function VSLProductionPanel() {
 
   const saveTest = (form) => {
     if (form.id) setTests((prev) => prev.map((t) => (t.id === form.id ? form : t)));
-    else setTests((prev) => [...prev, { ...form, id: uid() }]);
+    else {
+      setTests((prev) => [...prev, { ...form, id: uid() }]);
+      pushNotif(`Novo teste cadastrado: ${effectiveTestName(form, items, experts)}`);
+    }
     setTestModal(null);
   };
   const removeTest = (id) => setTests((prev) => prev.filter((t) => t.id !== id));
-  const updateTest = (id, patch) => setTests((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  const updateTest = (id, patch) => {
+    setTests((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    const t = (tests || []).find((x) => x.id === id);
+    if (t && patch.status === "rodando") pushNotif(`Teste iniciado: ${effectiveTestName({ ...t, ...patch }, items, experts)}`);
+    if (t && patch.status === "concluido") pushNotif(`Teste encerrado: ${effectiveTestName({ ...t, ...patch }, items, experts)}`);
+  };
 
   const saveExpert = (ex) => {
     setExperts((prev) => (prev.some((p) => p.id === ex.id) ? prev.map((p) => (p.id === ex.id ? ex : p)) : [...prev, ex]));
@@ -1689,7 +1715,7 @@ export default function VSLProductionPanel() {
     setExpertModal(null);
   };
 
-  if (!itemsReady || !funilReady || !slotLogReady || !testsReady || !expertsReady) return <div style={{ background: C.bg, minHeight: "100vh" }} />;
+  if (!itemsReady || !funilReady || !slotLogReady || !testsReady || !expertsReady || !notifsReady) return <div style={{ background: C.bg, minHeight: "100vh" }} />;
 
   const go = (t) => { setTab(t); setNavOpen(false); };
   const info = TAB_INFO[tab];
@@ -1797,10 +1823,54 @@ export default function VSLProductionPanel() {
           </div>
 
           <div className="flex items-center gap-2 ml-auto md:ml-0">
-            <button className="p-2 rounded-lg hover:bg-white/10 relative" title="Sincronizado">
-              <Bell size={17} color={C.text} />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full" style={{ background: C.ok }} />
-            </button>
+            <div className="relative">
+              <button onClick={openNotifs} className="p-2 rounded-lg hover:bg-white/10 relative" title="Notificações">
+                <Bell size={17} color={unseenCount > 0 ? C.accent : C.text} />
+                {unseenCount > 0 ? (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 rounded-full flex items-center justify-center text-[9px] font-bold" style={{ background: C.accent, color: "#0A0A0A" }}>
+                    {unseenCount > 9 ? "9+" : unseenCount}
+                  </span>
+                ) : (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full" style={{ background: C.ok }} title="Sincronizado" />
+                )}
+              </button>
+              {notifOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setNotifOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-80 max-w-[85vw] rounded-2xl overflow-hidden z-40" style={{ background: C.bg2, border: `1px solid ${C.cardBorder}`, boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
+                    <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+                      <span className="text-[12.5px] font-bold" style={{ color: C.primary }}>Notificações</span>
+                      {(notifs || []).length > 0 && (
+                        <button onClick={() => setNotifs([])} className="text-[10.5px]" style={{ color: C.dim }}>limpar</button>
+                      )}
+                    </div>
+                    <div className="max-h-80 overflow-y-auto">
+                      {(notifs || []).length === 0 ? (
+                        <p className="px-4 py-6 text-center text-[11.5px]" style={{ color: "#454545" }}>nenhuma notificação ainda</p>
+                      ) : (
+                        (notifs || []).slice(0, 40).map((n) => {
+                          const d = new Date(n.date);
+                          return (
+                            <div key={n.id} className="flex items-start gap-2.5 px-4 py-2.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                              <FlaskConical size={13} color={C.accent} className="mt-0.5 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-[12px] leading-snug" style={{ color: C.primary }}>{n.text}</p>
+                                <p className="text-[10px] mt-0.5" style={{ color: C.dim }}>
+                                  {d.toLocaleDateString("pt-BR")} {d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    <button onClick={() => { setNotifOpen(false); setTab("testes"); }} className="w-full py-2.5 text-[11.5px] font-semibold" style={{ color: C.accent, borderTop: `1px solid ${C.cardBorder}` }}>
+                      Ir para Testes →
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <button
               onClick={() => setModal(blank())}
               className="flex items-center gap-1.5 text-[12.5px] font-bold px-3.5 sm:px-4 py-2 rounded-full shrink-0"
