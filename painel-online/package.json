@@ -1,0 +1,13 @@
+{
+  "name": "painel-producao",
+  "version": "1.0.0",
+  "description": "Painel de Produção de VSLs — PAZ Marketing (dados compartilhados)",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

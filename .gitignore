@@ -1,0 +1,26 @@
+# Mídia e arquivos grandes (não vão para o GitHub)
+*.mp4
+*.m4a
+*.mov
+*.zip
+
+# Documentos internos / transcrições privadas
+transcricao-*.txt
+briefing-painel-producao.docx
+Manual-Painel-de-Producao.*
+
+# Protótipo antigo (mantemos só a versão v2)
+vsl-production-panel.jsx
+
+# Dados de runtime e dependências
+painel-online/data.json
+painel-online/data.json.tmp
+**/node_modules/
+
+# Config local de desenvolvimento
+.claude/
+
+# Sistema operacional
+Thumbs.db
+.DS_Store
+desktop.ini

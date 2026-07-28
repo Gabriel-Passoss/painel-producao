@@ -1,0 +1,1721 @@
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Plus, X, Link2, FileText, Video, Pencil, Trash2, ChevronDown, ChevronRight,
+  Layers, Radio, Clock, CircleDot, CheckCircle2, ArrowRightLeft, Search,
+  Film, ArrowUpCircle, ArrowDownCircle, Zap, Copy, Check, History, FlaskConical,
+  ExternalLink, LayoutDashboard, Bell, Menu, TrendingUp, Sparkles, Activity
+} from "lucide-react";
+
+/* ---------- Design tokens (Marko template, purple -> red) ---------- */
+const C = {
+  bg: "#050505",
+  bg2: "#0E0E0E",
+  card: "#101010",
+  cardBorder: "rgba(255,255,255,0.07)",
+  primary: "#EDEDED",
+  text: "#9A9A9A",
+  dim: "#5C5C5C",
+  accent: "#E5383B",
+  accentSoft: "rgba(229,56,59,0.12)",
+  accentBorder: "rgba(229,56,59,0.4)",
+  glow: "rgba(229,56,59,0.44)",
+  gold: "#EFBC2A",
+  ok: "#3DDC84",
+};
+
+const FONT = "'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif";
+
+const STATUS = {
+  a_editar: { label: "A editar", color: "#8B8B8B", Icon: Clock },
+  em_edicao: { label: "Em edição", color: C.gold, Icon: CircleDot },
+  editado: { label: "Editado", color: C.ok, Icon: CheckCircle2 },
+};
+const STATUS_ORDER = ["a_editar", "em_edicao", "editado"];
+
+const TYPE_LABEL = { vsl: "Corpo VSL", lead: "Lead", upsell: "Upsell", downsell: "Downsell" };
+const TYPE_ICON = { vsl: Film, lead: Zap, upsell: ArrowUpCircle, downsell: ArrowDownCircle };
+
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+/* ---------- Nomenclatura oficial (briefing §3) ---------- */
+const abbr3 = (s) => (s || "").trim().toUpperCase();
+const slug = (s) => (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+function funilName(experts, funilId) {
+  for (const ex of experts) {
+    const f = (ex.funis || []).find((fu) => fu.id === funilId);
+    if (f) return f.name;
+  }
+  return "";
+}
+
+function officialName(item, items, experts) {
+  const pair = (ed, cp) => [abbr3(ed), abbr3(cp)].filter(Boolean).join("-") || "?";
+  if (item.type === "upsell" || item.type === "downsell") {
+    return `${item.type.toUpperCase()}_${slug(item.produto) || "PRODUTO"}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
+  }
+  const funil = slug(funilName(experts, item.funilId)) || "FUNIL";
+  if (item.type === "vsl") {
+    return `VSL_${funil}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
+  }
+  // Lead: VSL_[FUNIL]_V[versão]_LEAD[nº]_[EDITOR LEAD]-[COPY LEAD]_[EDITOR CORPO]-[COPY CORPO]
+  const corpo = items.find((i) => i.type === "vsl" && i.funilId === item.funilId && i.versao === item.versao);
+  const base = `VSL_${funil}_V${item.versao || "?"}_LEAD${item.leadNum || "?"}_${pair(item.editor, item.copy)}`;
+  return corpo ? `${base}_${pair(corpo.editor, corpo.copy)}` : base;
+}
+
+/* Rótulo curto de um item para histórico/testes */
+function itemLabel(item, experts) {
+  if (!item) return "—";
+  if (item.type === "lead") return `Lead #${item.leadNum || "?"} V${item.versao || "?"}`;
+  if (item.type === "vsl") return `Corpo V${item.versao || "?"} (${funilName(experts, item.funilId) || "?"})`;
+  return `${item.produto || "sem produto"} V${item.versao || "?"}`;
+}
+
+const seedExperts = () => ([
+  { id: "ronald", name: "Ronald", funis: [{ id: "ronald-hftc", name: "HFTC" }, { id: "ronald-marketing", name: "Marketing" }] },
+  { id: "gabriele", name: "Gabriele Nunes", funis: [{ id: "gabriele-aiva", name: "Aiva" }] },
+  { id: "thay", name: "Thay Camilla", funis: [{ id: "thay-sofia", name: "Sofia" }] },
+  { id: "jhon", name: "Jhon", funis: [{ id: "jhon-atmoz", name: "Atmoz" }] },
+  { id: "leandro", name: "Leandro", funis: [{ id: "leandro-conecta", name: "Conecta Plus" }] },
+]);
+
+const seedItems = () => ([
+  { id: uid(), type: "vsl", expertId: "ronald", funilId: "ronald-hftc", versao: "2", editor: "THI", copy: "LUC", status: "editado", linkBruto: "", linkCopy: "", linkEditado: "", dataInicio: "", dataEntrega: "" },
+  { id: uid(), type: "lead", expertId: "ronald", funilId: "ronald-hftc", versao: "2", leadNum: "01", reaproveitada: false, origemVersao: "", editor: "SEL", copy: "LEA", status: "editado", linkBruto: "", linkCopy: "", linkEditado: "", dataInicio: "", dataEntrega: "" },
+]);
+
+/* ---------- Storage compartilhado ----------
+   Ordem de preferência:
+   1. API do servidor (/api/kv) — dados compartilhados entre todo mundo
+   2. window.storage — quando rodando como artifact do claude.ai
+   3. localStorage — fallback local (só neste navegador)                  */
+const API_BASE = "/api/kv/";
+let remoteOk = null;
+async function isRemote() {
+  if (remoteOk !== null) return remoteOk;
+  try {
+    remoteOk = (await fetch("/api/health")).ok;
+  } catch (e) {
+    remoteOk = false;
+  }
+  return remoteOk;
+}
+
+const storageBackend = {
+  async get(key) {
+    if (await isRemote()) {
+      const r = await fetch(API_BASE + encodeURIComponent(key));
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error("falha ao ler do servidor");
+      return r.json();
+    }
+    if (typeof window !== "undefined" && window.storage?.get) return window.storage.get(key);
+    const v = localStorage.getItem(key);
+    return v == null ? null : { value: v };
+  },
+  async set(key, value) {
+    if (await isRemote()) {
+      await fetch(API_BASE + encodeURIComponent(key), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      return;
+    }
+    if (typeof window !== "undefined" && window.storage?.set) return window.storage.set(key, value);
+    localStorage.setItem(key, value);
+  },
+};
+
+const POLL_MS = 15000;
+
+function useStorage(key, seedFn) {
+  const [ready, setReady] = useState(false);
+  const [data, setData] = useState(null);
+  const lastWriteRef = React.useRef(0);
+  const skipNextWriteRef = React.useRef(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await storageBackend.get(key);
+        setData(res && res.value ? JSON.parse(res.value) : seedFn());
+      } catch (e) {
+        setData(seedFn());
+      } finally {
+        setReady(true);
+      }
+    })();
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => {
+    if (!ready || data === null) return;
+    if (skipNextWriteRef.current) {
+      skipNextWriteRef.current = false;
+      return;
+    }
+    lastWriteRef.current = Date.now();
+    Promise.resolve(storageBackend.set(key, JSON.stringify(data))).catch(() => {});
+  }, [data, ready]);
+
+  // Sincronização: puxa alterações de outras pessoas periodicamente
+  useEffect(() => {
+    if (!ready) return;
+    let stopped = false;
+    const t = setInterval(async () => {
+      try {
+        if (!(await isRemote())) return;
+        // evita sobrescrever uma edição local recém-feita com dado antigo em trânsito
+        if (Date.now() - lastWriteRef.current < POLL_MS + 5000) return;
+        const res = await storageBackend.get(key);
+        if (stopped || !res || !res.value) return;
+        setData((cur) => {
+          if (JSON.stringify(cur) === res.value) return cur;
+          skipNextWriteRef.current = true;
+          return JSON.parse(res.value);
+        });
+      } catch (e) { /* offline momentâneo — tenta de novo no próximo ciclo */ }
+    }, POLL_MS);
+    return () => { stopped = true; clearInterval(t); };
+    // eslint-disable-next-line
+  }, [ready]);
+
+  return [data, setData, ready];
+}
+
+/* ---------- Small UI atoms ---------- */
+function Pill({ active, children, onClick, Icon }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold px-4 py-2 rounded-full transition-all hover:brightness-125"
+      style={
+        active
+          ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}`, boxShadow: `0 0 16px -4px ${C.glow}` }
+          : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.07)" }
+      }
+    >
+      {Icon && <Icon size={13} />}
+      {children}
+    </button>
+  );
+}
+
+function StatusBadge({ status }) {
+  const s = STATUS[status];
+  const Icon = s.Icon;
+  return (
+    <span className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ color: s.color, background: `${s.color}18`, border: `1px solid ${s.color}40` }}>
+      <Icon size={10} /> {s.label}
+    </span>
+  );
+}
+
+function IconLink({ href, Icon, label }) {
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={label}
+      className="p-1.5 rounded-lg transition-colors hover:bg-white/10 shrink-0"
+      style={{ color: C.text }}
+    >
+      <Icon size={13} color={C.accent} />
+    </a>
+  );
+}
+
+function CopyName({ name, big }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(name).then(() => { setOk(true); setTimeout(() => setOk(false), 1200); }).catch(() => {});
+        }
+      }}
+      title={`Copiar: ${name}`}
+      className={`inline-flex items-center gap-1.5 rounded-full shrink-0 ${big ? "text-[11.5px] px-3 py-1.5" : "text-[10px] px-1.5 py-0.5 max-w-[280px]"}`}
+      style={{ color: ok ? C.ok : "#7B7B7B", background: "rgba(255,255,255,0.04)", border: `1px solid ${ok ? C.ok + "50" : "rgba(255,255,255,0.09)"}` }}
+    >
+      {ok ? <Check size={big ? 12 : 9} /> : <Copy size={big ? 12 : 9} />}
+      <span className="truncate" style={{ fontFamily: "ui-monospace, monospace" }}>{name}</span>
+    </button>
+  );
+}
+
+const inputStyle = {
+  width: "100%",
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: "10px",
+  padding: "8px 12px",
+  color: C.primary,
+  fontSize: "13px",
+  outline: "none",
+  fontFamily: FONT,
+};
+
+function Field({ label, children }) {
+  return (
+    <label className="block mb-3">
+      <span className="block text-[10.5px] font-bold uppercase tracking-wide mb-1" style={{ color: "#5C5C5C" }}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div className="mb-5 pl-3" style={{ borderLeft: `2px solid ${C.accentBorder}` }}>
+      <p className="text-[10px] font-bold uppercase tracking-widest mb-2.5" style={{ color: C.accent }}>{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function LinkField({ label, Icon, value, onChange }) {
+  return (
+    <label className="block mb-2.5">
+      <div className="flex items-center gap-2 rounded-xl px-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
+        <Icon size={14} color="#6B6B6B" />
+        <div className="flex-1">
+          <span className="block text-[9.5px] font-bold uppercase tracking-wide pt-1.5" style={{ color: "#5C5C5C" }}>{label}</span>
+          <input
+            value={value}
+            onChange={onChange}
+            placeholder="https://..."
+            className="w-full bg-transparent outline-none pb-1.5 text-[13px]"
+            style={{ color: C.primary, fontFamily: FONT }}
+          />
+        </div>
+      </div>
+    </label>
+  );
+}
+
+/* ---------- Expert / Funil modal ---------- */
+function ExpertModal({ initial, items, onSave, onDelete, onClose }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [funis, setFunis] = useState(initial?.funis || []);
+  const [newFunil, setNewFunil] = useState("");
+  const [confirmDel, setConfirmDel] = useState(false);
+  const usedFunilIds = new Set(items.map((i) => i.funilId));
+
+  // itens que pertencem a este expert (bloqueiam a remoção)
+  const expertItemCount = initial?.id ? items.filter((i) => i.expertId === initial.id).length : 0;
+
+  const baseId = initial?.id || slug(name).toLowerCase() || uid();
+  const addFunil = () => {
+    const n = newFunil.trim();
+    if (!n) return;
+    setFunis((f) => [...f, { id: `${baseId}-${slug(n).toLowerCase() || uid()}-${uid().slice(0, 4)}`, name: n }]);
+    setNewFunil("");
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(2,2,2,0.75)", backdropFilter: "blur(4px)", fontFamily: FONT }}>
+      <div className="w-full max-w-md rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: C.bg2, border: `1px solid ${C.cardBorder}` }}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.accentSoft }}>
+              <Radio size={15} color={C.accent} />
+            </div>
+            <h3 className="text-[15px] font-bold" style={{ color: C.primary }}>{initial?.id ? "Editar expert" : "Novo expert"}</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-white/10"><X size={16} color={C.text} /></button>
+        </div>
+
+        <div className="px-5 pb-5 pt-4">
+          <Section label="Expert">
+            <Field label="Nome">
+              <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="ex: Ronald" />
+            </Field>
+          </Section>
+
+          <Section label="Funis">
+            {funis.length === 0 && <p className="text-[11.5px] mb-2" style={{ color: "#5C5C5C" }}>nenhum funil ainda — adicione abaixo</p>}
+            <div className="flex flex-col gap-1.5 mb-3">
+              {funis.map((f) => (
+                <div key={f.id} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <span className="text-[12.5px]" style={{ color: C.primary }}>{f.name}</span>
+                  {usedFunilIds.has(f.id) ? (
+                    <span className="text-[10px]" style={{ color: "#5C5C5C" }}>em uso</span>
+                  ) : (
+                    <button onClick={() => setFunis((prev) => prev.filter((x) => x.id !== f.id))} className="p-1 rounded-md hover:bg-white/10">
+                      <Trash2 size={12} color={C.text} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                style={{ ...inputStyle, marginBottom: 0 }}
+                value={newFunil}
+                onChange={(e) => setNewFunil(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addFunil()}
+                placeholder="nome do novo funil, ex: HFTC"
+              />
+              <button onClick={addFunil} className="flex items-center gap-1 text-[12px] font-bold px-3.5 py-2 rounded-full shrink-0" style={{ background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }}>
+                <Plus size={12} /> Funil
+              </button>
+            </div>
+          </Section>
+
+          <button
+            onClick={() => name.trim() && onSave({ id: baseId, name: name.trim(), funis })}
+            className="w-full mt-1 py-2.5 rounded-full font-bold text-[13px] transition-all"
+            style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 8px 24px -8px ${C.glow}`, opacity: name.trim() ? 1 : 0.4 }}
+          >
+            Salvar
+          </button>
+
+          {initial?.id && onDelete && (
+            <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${C.cardBorder}` }}>
+              {expertItemCount > 0 ? (
+                <p className="text-[11px] text-center" style={{ color: C.dim }}>
+                  Para remover este expert, apague antes os {expertItemCount} {expertItemCount === 1 ? "material" : "materiais"} dele na Produção.
+                </p>
+              ) : !confirmDel ? (
+                <button
+                  onClick={() => setConfirmDel(true)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-full text-[12.5px] font-semibold transition-colors hover:bg-white/5"
+                  style={{ color: C.accent, border: `1px solid ${C.accentBorder}` }}
+                >
+                  <Trash2 size={13} /> Remover expert
+                </button>
+              ) : (
+                <div>
+                  <p className="text-[12px] text-center mb-2" style={{ color: C.text }}>
+                    Remover <b style={{ color: C.primary }}>{initial.name}</b> e seus funis? Isso não pode ser desfeito.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setConfirmDel(false)} className="flex-1 py-2 rounded-full text-[12.5px] font-semibold" style={{ background: "rgba(255,255,255,0.05)", color: C.text }}>
+                      Cancelar
+                    </button>
+                    <button onClick={() => onDelete(initial.id)} className="flex-1 py-2 rounded-full text-[12.5px] font-bold" style={{ background: C.accent, color: "#0A0A0A" }}>
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Item modal ---------- */
+function ItemModal({ initial, experts, items, onSave, onClose }) {
+  const [form, setForm] = useState({ posicao: "1", associar: true, associadoId: "", ...initial });
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const expert = experts.find((e) => e.id === form.expertId);
+  const isVslLike = form.type === "vsl" || form.type === "lead";
+  const isReusable = form.type === "upsell" || form.type === "downsell";
+  const TypeIcon = TYPE_ICON[form.type] || Layers;
+
+  const candidatosAssociacao = items.filter((it) => it.type === form.type && it.posicao === "1" && it.id !== form.id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(2,2,2,0.75)", backdropFilter: "blur(4px)", fontFamily: FONT }}>
+      <div className="w-full max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: C.bg2, border: `1px solid ${C.cardBorder}` }}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 sticky top-0 z-10" style={{ background: C.bg2, borderBottom: `1px solid ${C.cardBorder}` }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.accentSoft }}>
+              <TypeIcon size={15} color={C.accent} />
+            </div>
+            <h3 className="text-[15px] font-bold" style={{ color: C.primary }}>{initial.id ? "Editar item" : "Novo item"}</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-white/10"><X size={16} color={C.text} /></button>
+        </div>
+
+        <div className="px-5 pb-5 pt-4">
+          <Section label="Tipo">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {["vsl", "lead", "upsell", "downsell"].map((t) => {
+                const Icon = TYPE_ICON[t];
+                const active = form.type === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setForm((f) => ({ ...f, type: t }))}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-full"
+                    style={active ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` } : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <Icon size={12} /> {TYPE_LABEL[t]}
+                  </button>
+                );
+              })}
+            </div>
+          </Section>
+
+          <Section label="Onde">
+            {isVslLike ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Expert">
+                  <select style={inputStyle} value={form.expertId} onChange={(e) => setForm((f) => ({ ...f, expertId: e.target.value, funilId: "" }))}>
+                    <option value="">selecione</option>
+                    {experts.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Funil">
+                  <select style={inputStyle} value={form.funilId} onChange={set("funilId")}>
+                    <option value="">selecione</option>
+                    {(expert?.funis || []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
+                </Field>
+              </div>
+            ) : (
+              <Field label="Produto">
+                <input style={inputStyle} value={form.produto || ""} onChange={set("produto")} placeholder="ex: Carteira Black" />
+              </Field>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Versão"><input style={inputStyle} value={form.versao} onChange={set("versao")} placeholder="1" /></Field>
+              {form.type === "lead" && <Field label="Número da lead"><input style={inputStyle} value={form.leadNum} onChange={set("leadNum")} placeholder="01" /></Field>}
+              {form.type === "downsell" && (
+                <Field label="Formato">
+                  <select style={inputStyle} value={form.tipo || "video"} onChange={set("tipo")}>
+                    <option value="video">Vídeo</option>
+                    <option value="tsl">TSL (texto)</option>
+                  </select>
+                </Field>
+              )}
+            </div>
+
+            {form.type === "lead" && (
+              <>
+                <div className="flex items-center gap-2 mt-3 mb-1">
+                  <input type="checkbox" id="reap" checked={!!form.reaproveitada} onChange={(e) => setForm((f) => ({ ...f, reaproveitada: e.target.checked }))} className="w-4 h-4" />
+                  <label htmlFor="reap" className="text-[12.5px]" style={{ color: C.text }}>Reaproveitada de outra versão</label>
+                </div>
+                {form.reaproveitada && (
+                  <Field label="Reaproveitada da versão"><input style={inputStyle} value={form.origemVersao} onChange={set("origemVersao")} placeholder="1" /></Field>
+                )}
+              </>
+            )}
+
+            {isReusable && (
+              <div className="mt-3">
+                <span className="block text-[10.5px] font-bold uppercase tracking-wide mb-1.5" style={{ color: "#5C5C5C" }}>Posição</span>
+                <div className="flex items-center gap-1.5 mb-3">
+                  {["1", "2"].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setForm((f) => ({ ...f, posicao: p, associar: p === "2" ? true : f.associar, associadoId: p === "1" ? "" : f.associadoId }))}
+                      className="text-[12px] font-semibold px-3.5 py-1.5 rounded-full"
+                      style={form.posicao === p ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` } : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                    >
+                      {TYPE_LABEL[form.type]} {p}
+                    </button>
+                  ))}
+                </div>
+
+                {form.posicao === "2" && (
+                  <div className="rounded-xl p-3 mb-3" style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[12px] font-semibold" style={{ color: C.text }}>Associar a um {TYPE_LABEL[form.type]} 1?</span>
+                      <button
+                        onClick={() => setForm((f) => ({ ...f, associar: !f.associar, associadoId: f.associar ? "" : f.associadoId }))}
+                        className="w-9 h-5 rounded-full relative transition-colors"
+                        style={{ background: form.associar ? C.accent : "rgba(255,255,255,0.15)" }}
+                      >
+                        <span className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" style={{ left: form.associar ? 18 : 2 }} />
+                      </button>
+                    </div>
+                    {form.associar && (
+                      <select style={inputStyle} value={form.associadoId} onChange={set("associadoId")}>
+                        <option value="">selecione o {TYPE_LABEL[form.type]} 1</option>
+                        {candidatosAssociacao.map((it) => (
+                          <option key={it.id} value={it.id}>{it.produto || "sem produto"} · V{it.versao}</option>
+                        ))}
+                      </select>
+                    )}
+                    {!form.associar && (
+                      <p className="text-[11px]" style={{ color: "#5C5C5C" }}>Fica como {TYPE_LABEL[form.type].toLowerCase()} avulso, sem vínculo.</p>
+                    )}
+                  </div>
+                )}
+
+                <Field label="Contexto da oferta (opcional)">
+                  <input style={inputStyle} value={form.contexto || ""} onChange={set("contexto")} placeholder='ex: "agradece a compra da Aiva Pro"' />
+                </Field>
+              </div>
+            )}
+          </Section>
+
+          <Section label="Quem">
+            <div className="grid grid-cols-2 gap-3">
+              {!(form.type === "downsell" && form.tipo === "tsl") && (
+                <Field label="Editor"><input style={inputStyle} value={form.editor} onChange={set("editor")} placeholder="THI" /></Field>
+              )}
+              <Field label="Copy"><input style={inputStyle} value={form.copy} onChange={set("copy")} placeholder="LUC" /></Field>
+            </div>
+          </Section>
+
+          <Section label="Status & prazo">
+            <div className="flex items-center gap-1.5 mb-3">
+              {STATUS_ORDER.map((s) => {
+                const st = STATUS[s];
+                const Icon = st.Icon;
+                const active = form.status === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setForm((f) => ({ ...f, status: s }))}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-full"
+                    style={active ? { background: `${st.color}1F`, color: st.color, border: `1px solid ${st.color}55` } : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <Icon size={12} /> {st.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Data de início"><input type="date" style={inputStyle} value={form.dataInicio} onChange={set("dataInicio")} /></Field>
+              <Field label="Data de entrega"><input type="date" style={inputStyle} value={form.dataEntrega} onChange={set("dataEntrega")} /></Field>
+            </div>
+          </Section>
+
+          <Section label="Links">
+            <LinkField label="Material bruto" Icon={Video} value={form.linkBruto} onChange={set("linkBruto")} />
+            <LinkField label="Copy / roteiro" Icon={FileText} value={form.linkCopy} onChange={set("linkCopy")} />
+            <LinkField label="Material editado" Icon={Link2} value={form.linkEditado} onChange={set("linkEditado")} />
+          </Section>
+
+          <Section label="Nomenclatura oficial">
+            <div className="flex items-center gap-2 flex-wrap">
+              <CopyName big name={officialName(form, items, experts)} />
+            </div>
+            <p className="text-[10.5px] mt-1.5" style={{ color: "#5C5C5C" }}>
+              Gerada automaticamente a partir dos campos — é o mesmo nome usado no Google Drive.
+            </p>
+          </Section>
+
+          <button
+            onClick={() => onSave(form)}
+            className="w-full mt-1 py-2.5 rounded-full font-bold text-[13px] transition-all"
+            style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 8px 24px -8px ${C.glow}` }}
+          >
+            Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Item card ---------- */
+function Tag({ children, color }) {
+  const c = color || C.text;
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0" style={{ color: c, background: `${c}14`, border: `1px solid ${c}30` }}>
+      {children}
+    </span>
+  );
+}
+
+function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
+  const Icon = TYPE_ICON[item.type];
+  const isTsl = item.type === "downsell" && item.tipo === "tsl";
+  const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado;
+  const s = STATUS[item.status];
+  const linked = item.posicao === "2" && item.associar && item.associadoId
+    ? allItems?.find((i) => i.id === item.associadoId)
+    : null;
+
+  const title = item.type === "lead"
+    ? `Lead #${item.leadNum || "?"}`
+    : item.type === "vsl"
+    ? `Corpo V${item.versao || "?"}`
+    : (item.produto || "sem produto");
+
+  const who = item.editor || item.copy ? [item.editor, item.copy].filter(Boolean).join(" · ") : "sem editor/copy";
+  const dates = (item.dataInicio ? new Date(item.dataInicio + "T00:00:00").toLocaleDateString("pt-BR") : "")
+    + (item.dataInicio && item.dataEntrega ? " → " : "")
+    + (item.dataEntrega ? new Date(item.dataEntrega + "T00:00:00").toLocaleDateString("pt-BR") : "");
+
+  return (
+    <div
+      className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-white/[0.025]"
+      style={{ borderBottom: "1px solid rgba(255,255,255,0.045)", boxShadow: `inset 2.5px 0 0 ${s.color}` }}
+    >
+      <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" title={TYPE_LABEL[item.type]} style={{ background: "rgba(255,255,255,0.045)", border: "1px solid rgba(255,255,255,0.09)" }}>
+        <Icon size={14} color={C.accent} />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap leading-tight">
+          <span className="text-[13px] font-bold truncate" style={{ color: C.primary }}>{title}</span>
+          {item.type === "lead" && item.versao && <Tag>V{item.versao}</Tag>}
+          {(item.type === "upsell" || item.type === "downsell") && (
+            <>
+              <Tag>V{item.versao || "?"}</Tag>
+              <Tag color={item.posicao === "2" ? C.gold : undefined}>{TYPE_LABEL[item.type]} {item.posicao || "1"}</Tag>
+            </>
+          )}
+          {isTsl && <Tag>TSL — só copy</Tag>}
+          {item.reaproveitada && <Tag color={C.gold}>reaproveitada da V{item.origemVersao || "?"}</Tag>}
+          {linked && (
+            <Tag color={C.gold}><ArrowRightLeft size={9} /> segue {linked.produto || "?"} V{linked.versao}</Tag>
+          )}
+          {item.posicao === "2" && !item.associar && <Tag>avulso</Tag>}
+        </div>
+        <p className="text-[11px] truncate mt-0.5" style={{ color: C.dim }}>
+          {who}
+          {dates && <span> · {dates}</span>}
+          {(item.type === "upsell" || item.type === "downsell") && item.contexto && (
+            <span className="italic" title={item.contexto}> · “{item.contexto}”</span>
+          )}
+        </p>
+      </div>
+
+      {hasLinks && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          <IconLink href={item.linkBruto} Icon={Video} label="Material bruto" />
+          <IconLink href={item.linkCopy} Icon={FileText} label="Copy / roteiro" />
+          <IconLink href={item.linkEditado} Icon={Link2} label="Material editado" />
+        </div>
+      )}
+
+      <span className="hidden md:inline-flex"><CopyName name={officialName(item, allItems || [], experts || [])} /></span>
+
+      <StatusBadge status={item.status} />
+
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <button onClick={() => onEdit(item)} title="Editar" className="p-1.5 rounded-lg hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
+        <button onClick={() => onDelete(item.id)} title="Excluir" className="p-1.5 rounded-lg hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Type block (flat, single-type) ---------- */
+function TypeBlock({ title, Icon, items, allItems, experts, onEdit, onDelete, emptyText, groupLabel }) {
+  return (
+    <div className="rounded-2xl overflow-hidden mb-3" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: "rgba(255,255,255,0.02)", borderBottom: `1px solid ${C.cardBorder}` }}>
+        {Icon && <Icon size={12} color={C.accent} />}
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.accent }}>{title}</span>
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: C.dim, background: "rgba(255,255,255,0.05)" }}>{items.length}</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="px-4 py-4 text-[11.5px] text-center" style={{ color: "#454545" }}>{emptyText || "nada aqui ainda"}</div>
+      ) : (
+        items.map((it, idx) => {
+          const label = groupLabel ? groupLabel(it) : null;
+          const prevLabel = groupLabel && idx > 0 ? groupLabel(items[idx - 1]) : null;
+          return (
+            <React.Fragment key={it.id}>
+              {label && label !== prevLabel && (
+                <div className="px-3.5 py-1" style={{ background: "rgba(255,255,255,0.015)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <span className="text-[9.5px] font-bold uppercase tracking-widest" style={{ color: "#5C5C5C" }}>{label}</span>
+                </div>
+              )}
+              <ItemCard item={it} allItems={allItems} experts={experts} onEdit={onEdit} onDelete={onDelete} />
+            </React.Fragment>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/* ---------- Status summary ---------- */
+function StatusSummary({ items }) {
+  const counts = { a_editar: 0, em_edicao: 0, editado: 0 };
+  items.forEach((it) => { counts[it.status] = (counts[it.status] || 0) + 1; });
+  return (
+    <div className="grid grid-cols-3 gap-2.5 mb-5">
+      {STATUS_ORDER.map((k) => {
+        const s = STATUS[k];
+        const Icon = s.Icon;
+        return (
+          <div key={k} className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${s.color}14`, border: `1px solid ${s.color}30` }}>
+              <Icon size={15} color={s.color} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[19px] font-extrabold leading-none" style={{ color: C.primary }}>{counts[k]}</p>
+              <p className="text-[10px] uppercase tracking-widest mt-1 truncate" style={{ color: s.color }}>{s.label}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- Expert overview card (for Geral) ---------- */
+function ExpertOverviewCard({ expert, items, onOpen }) {
+  const mine = items.filter((i) => i.expertId === expert.id);
+  const counts = { a_editar: 0, em_edicao: 0, editado: 0 };
+  mine.forEach((it) => { counts[it.status] = (counts[it.status] || 0) + 1; });
+  const total = mine.length;
+  const initials = expert.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+
+  return (
+    <button
+      onClick={onOpen}
+      className="group text-left rounded-2xl p-4 transition-all hover:scale-[1.012]"
+      style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-extrabold shrink-0" style={{ background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }}>
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-[13.5px] font-bold truncate" style={{ color: C.primary }}>{expert.name}</h4>
+          <p className="text-[10.5px] truncate" style={{ color: C.dim }}>{expert.funis.map((f) => f.name).join(" · ") || "sem funis"}</p>
+        </div>
+        <ChevronRight size={14} color={C.dim} className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+      </div>
+
+      {total > 0 ? (
+        <>
+          <div className="flex h-1.5 rounded-full overflow-hidden mb-2.5" style={{ background: "rgba(255,255,255,0.06)" }}>
+            {STATUS_ORDER.map((k) => counts[k] > 0 && (
+              <span key={k} style={{ width: `${(counts[k] / total) * 100}%`, background: STATUS[k].color }} />
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            {STATUS_ORDER.map((k) => (
+              <span key={k} className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: counts[k] ? STATUS[k].color : "#3E3E3E" }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: counts[k] ? STATUS[k].color : "#3E3E3E" }} />
+                {counts[k]} {STATUS[k].label.toLowerCase()}
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-[11px]" style={{ color: "#454545" }}>sem itens ainda — clique para abrir</p>
+      )}
+    </button>
+  );
+}
+
+/* ---------- Produção tab ---------- */
+function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, onNewExpert, onEditExpert }) {
+  const [view, setView] = useState("geral"); // 'geral' | expertId
+  const [typeFilter, setTypeFilter] = useState("todos");
+  const [localQ, setLocalQ] = useState("");
+  const q = localQ || globalSearch || "";
+
+  const matchesFilters = (it) => {
+    if (typeFilter !== "todos" && it.type !== typeFilter) return false;
+    if (q) {
+      const funil = funilName(experts, it.funilId);
+      const expert = experts.find((e) => e.id === it.expertId);
+      const leadTxt = it.type === "lead" ? `lead #${it.leadNum || ""} lead${it.leadNum || ""} ${it.leadNum || ""}` : "";
+      const corpoTxt = it.type === "vsl" ? "corpo vsl corpo" : "";
+      const hay = [
+        it.produto, it.editor, it.copy, it.leadNum, it.versao,
+        it.versao ? `v${it.versao}` : "", TYPE_LABEL[it.type], funil, expert?.name,
+        it.contexto, corpoTxt, leadTxt,
+        officialName(it, items, experts),
+      ].filter(Boolean).join(" ").toLowerCase();
+      // cada palavra buscada precisa aparecer (busca por partes, ex: "corpo v2")
+      const termos = q.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!termos.every((t) => hay.includes(t))) return false;
+    }
+    return true;
+  };
+
+  const vslLikeAll = items.filter((i) => (i.type === "vsl" || i.type === "lead") && matchesFilters(i));
+  const reusableAll = items.filter((i) => (i.type === "upsell" || i.type === "downsell") && matchesFilters(i));
+
+  const selectStyle = {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    color: C.primary,
+    fontSize: "12.5px",
+    outline: "none",
+    fontFamily: FONT,
+  };
+
+  const currentExpert = experts.find((e) => e.id === view);
+
+  const renderExpertDetail = (ex) => {
+    const expertItems = vslLikeAll.filter((i) => i.expertId === ex.id);
+    return (
+      <div>
+        {ex.funis.map((f) => {
+          const funilItems = expertItems.filter((i) => i.funilId === f.id);
+          const corpoItems = funilItems.filter((i) => i.type === "vsl").sort((a, b) => (b.versao || "").localeCompare(a.versao || ""));
+          const leadItems = funilItems.filter((i) => i.type === "lead").sort((a, b) => (b.versao || "").localeCompare(a.versao || "") || (a.leadNum || "").localeCompare(b.leadNum || ""));
+          return (
+            <div key={f.id} className="rounded-2xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${C.cardBorder}` }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-1 h-4 rounded-full" style={{ background: C.accent }} />
+                <p className="text-[14px] font-bold" style={{ color: C.primary }}>Funil {f.name}</p>
+                <span className="text-[10.5px]" style={{ color: C.dim }}>{funilItems.length} {funilItems.length === 1 ? "item" : "itens"}</span>
+              </div>
+              <TypeBlock title="Leads" Icon={Zap} items={leadItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma lead cadastrada ainda" groupLabel={(it) => `Corpo V${it.versao || "?"}`} />
+              <TypeBlock title="Corpo VSL" Icon={Film} items={corpoItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum corpo cadastrado ainda" />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 flex-wrap mb-4">
+        <Pill active={view === "geral"} onClick={() => setView("geral")}>Geral</Pill>
+        {experts.map((e) => <Pill key={e.id} active={view === e.id} onClick={() => setView(e.id)}>{e.name}</Pill>)}
+        <button
+          onClick={onNewExpert}
+          className="flex items-center gap-1 text-[12.5px] font-semibold px-3.5 py-2 rounded-full"
+          style={{ background: "rgba(255,255,255,0.03)", color: "#6B6B6B", border: "1px dashed rgba(255,255,255,0.15)" }}
+          title="Cadastrar novo expert"
+        >
+          <Plus size={12} /> Expert
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap mb-4">
+        <div className="flex items-center gap-1.5 px-3 py-2 rounded-full flex-1 min-w-[160px]" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+          <Search size={13} color="#5C5C5C" />
+          <input value={q} onChange={(e) => setLocalQ(e.target.value)} placeholder="Buscar por produto, editor, copy..." className="bg-transparent outline-none text-[12.5px] flex-1" style={{ color: C.primary, fontFamily: FONT }} />
+        </div>
+        <select style={selectStyle} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <option value="todos">Todos os tipos</option>
+          <option value="vsl">Corpo VSL</option>
+          <option value="lead">Lead</option>
+          <option value="upsell">Upsell</option>
+          <option value="downsell">Downsell</option>
+        </select>
+      </div>
+
+      {view === "geral" ? (
+        <>
+          <StatusSummary items={[...vslLikeAll, ...reusableAll]} />
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-1 h-4 rounded-full" style={{ background: C.accent }} />
+            <h4 className="text-[13.5px] font-bold" style={{ color: C.primary }}>Experts</h4>
+            <span className="text-[10.5px]" style={{ color: C.dim }}>clique num card para abrir a produção do expert</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-6">
+            {experts.map((ex) => (
+              <ExpertOverviewCard key={ex.id} expert={ex} items={vslLikeAll} onOpen={() => setView(ex.id)} />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 mb-2 mt-2">
+            <span className="w-1 h-4 rounded-full" style={{ background: C.gold }} />
+            <h4 className="text-[13.5px] font-bold" style={{ color: C.primary }}>Biblioteca de Upsell & Downsell</h4>
+            <span className="text-[10.5px]" style={{ color: C.dim }}>compartilhada entre todos os experts</span>
+          </div>
+          <TypeBlock title="Upsell" Icon={ArrowUpCircle} items={reusableAll.filter((i) => i.type === "upsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum upsell cadastrado ainda" />
+          <TypeBlock title="Downsell" Icon={ArrowDownCircle} items={reusableAll.filter((i) => i.type === "downsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum downsell cadastrado ainda" />
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px]" style={{ color: "#5C5C5C" }}>
+              {currentExpert ? `${currentExpert.funis.length} ${currentExpert.funis.length === 1 ? "funil" : "funis"}` : ""}
+            </span>
+            <button
+              onClick={() => currentExpert && onEditExpert(currentExpert)}
+              className="flex items-center gap-1.5 text-[11.5px] font-semibold px-3 py-1.5 rounded-full"
+              style={{ background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+            >
+              <Pencil size={11} /> Editar expert / funis
+            </button>
+          </div>
+          <StatusSummary items={vslLikeAll.filter((i) => i.expertId === view)} />
+          {currentExpert && renderExpertDetail(currentExpert)}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Slot picker ---------- */
+function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange }) {
+  const [open, setOpen] = useState(false);
+  const currentIds = multi ? (current || []) : current ? [current] : [];
+  const selectedItems = eligible.filter((it) => currentIds.includes(it.id));
+
+  const toggle = (id) => {
+    if (multi) {
+      const next = currentIds.includes(id) ? currentIds.filter((x) => x !== id) : [...currentIds, id];
+      onChange(next);
+    } else {
+      onChange(id === current ? null : id);
+      setOpen(false);
+    }
+  };
+
+  const filled = selectedItems.length > 0;
+  return (
+    <div
+      className="rounded-2xl p-3 relative transition-all h-full"
+      style={{
+        background: filled ? "rgba(229,56,59,0.05)" : C.card,
+        border: filled ? `1px solid ${C.accentBorder}` : "1px dashed rgba(255,255,255,0.14)",
+        minHeight: 96,
+        boxShadow: filled ? `0 0 18px -10px ${C.glow}` : "none",
+      }}
+    >
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {num && (
+          <span
+            className="w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-extrabold shrink-0"
+            style={filled
+              ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }
+              : { background: "rgba(255,255,255,0.05)", color: "#5C5C5C", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            {num}
+          </span>
+        )}
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: filled ? C.accent : "#5C5C5C" }}>{label}</p>
+      </div>
+
+      {selectedItems.length === 0 ? (
+        <p className="text-[11.5px] mb-2" style={{ color: "#454545" }}>vazio</p>
+      ) : (
+        <div className="flex flex-col gap-1 mb-2">
+          {selectedItems.map((it) => (
+            <div key={it.id} className="flex items-center justify-between text-[11.5px] px-2 py-1 rounded-lg" style={{ background: C.accentSoft, color: C.primary }}>
+              <span className="truncate">
+                {it.type === "lead" ? `Lead #${it.leadNum}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
+              </span>
+              <span className="flex items-center gap-1 ml-1 shrink-0">
+                {it.linkEditado && (
+                  <a href={it.linkEditado} target="_blank" rel="noreferrer" title="Abrir material editado" onClick={(e) => e.stopPropagation()}>
+                    <ExternalLink size={11} color={C.accent} />
+                  </a>
+                )}
+                <button onClick={() => toggle(it.id)}><X size={11} color={C.accent} /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button onClick={() => setOpen((o) => !o)} className="text-[11px] font-semibold flex items-center gap-1" style={{ color: C.accent }}>
+        <ArrowRightLeft size={11} /> {multi ? "gerenciar" : "trocar"}
+      </button>
+
+      {open && (
+        <div className="absolute z-20 top-full left-0 mt-1 w-64 max-h-56 overflow-y-auto rounded-xl p-2" style={{ background: "#161616", border: `1px solid ${C.cardBorder}`, boxShadow: "0 12px 32px rgba(0,0,0,0.6)" }}>
+          {eligible.length === 0 && <p className="text-[11px] p-2" style={{ color: "#5C5C5C" }}>nenhum item editado disponível</p>}
+          {eligible.map((it) => (
+            <button
+              key={it.id}
+              onClick={() => toggle(it.id)}
+              className="w-full text-left text-[11.5px] px-2 py-1.5 rounded-lg mb-0.5 flex items-center justify-between"
+              style={{ background: currentIds.includes(it.id) ? C.accentSoft : "transparent", color: currentIds.includes(it.id) ? C.accent : C.text }}
+            >
+              <span className="truncate">
+                {it.type === "lead" ? `Lead #${it.leadNum} (${it.editor})` : it.produto ? `${it.produto} V${it.versao} (${it.editor || it.copy})` : `V${it.versao} (${it.editor})`}
+              </span>
+              {currentIds.includes(it.id) && <CheckCircle2 size={12} />}
+            </button>
+          ))}
+          {!multi && <button onClick={() => setOpen(false)} className="w-full text-center text-[11px] mt-1 py-1" style={{ color: "#5C5C5C" }}>fechar</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Funil Atual tab ---------- */
+const EMPTY_SLOTS = { leads: [], corpo: null, upsell1: null, downsell1: null, upsell2: null, downsell2: null };
+const SLOT_LABEL = { leads: "Lead", corpo: "Corpo VSL", upsell1: "Upsell 1", downsell1: "Downsell 1", upsell2: "Upsell 2", downsell2: "Downsell 2" };
+
+function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, setSlotLog }) {
+  const editado = items.filter((i) => i.status === "editado");
+  const [histOpen, setHistOpen] = useState({});
+
+  const getSlots = (funilId) => funilState[funilId] || EMPTY_SLOTS;
+
+  const updateSlot = (funilId, slot, value) => {
+    const cur = funilState[funilId] || EMPTY_SLOTS;
+    const before = cur[slot];
+
+    // Registro automático de troca (briefing 5.2): item anterior, item novo, data
+    const entries = [];
+    if (slot === "leads") {
+      const prevIds = before || [];
+      const nextIds = value || [];
+      nextIds.filter((id) => !prevIds.includes(id)).forEach((id) => entries.push({ fromId: null, toId: id }));
+      prevIds.filter((id) => !nextIds.includes(id)).forEach((id) => entries.push({ fromId: id, toId: null }));
+    } else if (before !== value) {
+      entries.push({ fromId: before || null, toId: value || null });
+    }
+    if (entries.length) {
+      setSlotLog((log) => [
+        ...entries.map((en) => ({ id: uid(), date: new Date().toISOString(), funilId, slot, ...en })),
+        ...(log || []),
+      ]);
+    }
+
+    setFunilState((prev) => {
+      const c = prev[funilId] || EMPTY_SLOTS;
+      return { ...prev, [funilId]: { ...c, [slot]: value } };
+    });
+  };
+
+  const renderHistory = (funilId) => {
+    const entries = (slotLog || []).filter((l) => l.funilId === funilId);
+    if (entries.length === 0) return null;
+    const open = !!histOpen[funilId];
+    return (
+      <div className="mt-3">
+        <button
+          onClick={() => setHistOpen((o) => ({ ...o, [funilId]: !o[funilId] }))}
+          className="flex items-center gap-1.5 text-[11px] font-semibold"
+          style={{ color: "#6B6B6B" }}
+        >
+          <History size={11} /> Histórico de trocas ({entries.length})
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </button>
+        {open && (
+          <div className="mt-2 rounded-xl overflow-hidden" style={{ border: `1px solid ${C.cardBorder}`, background: "rgba(255,255,255,0.015)" }}>
+            {entries.slice(0, 30).map((l) => {
+              const from = items.find((i) => i.id === l.fromId);
+              const to = items.find((i) => i.id === l.toId);
+              const d = new Date(l.date);
+              return (
+                <div key={l.id} className="flex items-center gap-2 px-3 py-1.5 text-[11px]" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", color: C.text }}>
+                  <span className="shrink-0" style={{ color: "#5C5C5C" }}>
+                    {d.toLocaleDateString("pt-BR")} {d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <span className="font-semibold shrink-0" style={{ color: C.primary }}>{SLOT_LABEL[l.slot]}</span>
+                  <span className="truncate">{from ? itemLabel(from, experts) : "vazio"}</span>
+                  <ArrowRightLeft size={10} color={C.accent} className="shrink-0" />
+                  <span className="truncate" style={{ color: to ? C.primary : "#5C5C5C" }}>{to ? itemLabel(to, experts) : "removido"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      {experts.map((ex) => (
+        <div key={ex.id}>
+          <div className="flex items-center gap-2 mb-2.5">
+            <Radio size={14} color={C.accent} />
+            <h3 className="text-[14px] font-bold" style={{ color: C.primary }}>{ex.name}</h3>
+          </div>
+          <div className="grid grid-cols-1 gap-4">
+            {ex.funis.map((f) => {
+              const slots = getSlots(f.id);
+              const leadsEligible = editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id);
+              const corpoEligible = editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id);
+              const upsellEligible = editado.filter((i) => i.type === "upsell");
+              const downsellEligible = editado.filter((i) => i.type === "downsell");
+              const slotDefs = [
+                { key: "leads", label: "Lead", multi: true, current: slots.leads, eligible: leadsEligible },
+                { key: "corpo", label: "Corpo VSL", current: slots.corpo, eligible: corpoEligible },
+                { key: "upsell1", label: "Upsell 1", current: slots.upsell1, eligible: upsellEligible },
+                { key: "downsell1", label: "Downsell 1", current: slots.downsell1, eligible: downsellEligible },
+                { key: "upsell2", label: "Upsell 2", current: slots.upsell2, eligible: upsellEligible },
+                { key: "downsell2", label: "Downsell 2", current: slots.downsell2, eligible: downsellEligible },
+              ];
+              const filledCount = slotDefs.filter((sd) => (sd.multi ? (sd.current || []).length > 0 : !!sd.current)).length;
+              return (
+                <div key={f.id} className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${C.cardBorder}` }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-[13px] font-bold" style={{ color: C.primary }}>{f.name}</p>
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: filledCount > 0 ? C.ok : "#454545" }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: filledCount > 0 ? C.ok : "#454545" }} />
+                      {filledCount}/6 no ar
+                    </span>
+                  </div>
+                  <div className="flex items-stretch gap-1.5 flex-wrap">
+                    {slotDefs.map((sd, i) => (
+                      <React.Fragment key={sd.key}>
+                        {i > 0 && (
+                          <div className="hidden xl:flex items-center shrink-0">
+                            <ChevronRight size={13} color="#3E3E3E" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-[150px]">
+                          <SlotPicker label={sd.label} num={i + 1} multi={sd.multi} current={sd.current} eligible={sd.eligible} onChange={(v) => updateSlot(f.id, sd.key, v)} />
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  {renderHistory(f.id)}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Testes de Lead (registro p/ VTurb + API) ---------- */
+const TEST_STATUS = {
+  planejado: { label: "Planejado", color: "#8B8B8B", Icon: Clock },
+  rodando: { label: "Rodando", color: C.gold, Icon: Radio },
+  concluido: { label: "Concluído", color: C.ok, Icon: CheckCircle2 },
+};
+const TEST_STATUS_ORDER = ["planejado", "rodando", "concluido"];
+
+function testName(test, items, experts) {
+  const funil = slug(funilName(experts, test.funilId)) || "FUNIL";
+  const leads = (test.leadIds || [])
+    .map((id) => items.find((i) => i.id === id))
+    .filter(Boolean)
+    .map((l) => l.leadNum || "?")
+    .sort();
+  const leadPart = leads.length ? `LEAD${leads.join("-")}` : "LEAD?";
+  const d = test.dataInicio ? new Date(test.dataInicio + "T00:00:00") : new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const aa = String(d.getFullYear()).slice(2);
+  return `TESTE_${funil}_V${test.corpoVersao || "?"}_${leadPart}_${dd}${mm}${aa}`;
+}
+
+function TestStatusBadge({ status }) {
+  const s = TEST_STATUS[status] || TEST_STATUS.planejado;
+  const Icon = s.Icon;
+  return (
+    <span className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ color: s.color, background: `${s.color}18`, border: `1px solid ${s.color}40` }}>
+      <Icon size={10} /> {s.label}
+    </span>
+  );
+}
+
+function TesteModal({ initial, experts, items, onSave, onClose }) {
+  const [form, setForm] = useState({
+    funilId: "", corpoVersao: "", leadIds: [], split: "90 / 5 / 5",
+    solicitante: "", linkVturb: "", status: "planejado",
+    dataInicio: "", dataFim: "", obs: "",
+    ...initial,
+  });
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const allFunis = experts.flatMap((ex) => ex.funis.map((f) => ({ ...f, expertName: ex.name, expertId: ex.id })));
+  const funil = allFunis.find((f) => f.id === form.funilId);
+  const leadsDoFunil = items.filter((i) => i.type === "lead" && i.funilId === form.funilId && (!form.corpoVersao || i.versao === form.corpoVersao));
+
+  const toggleLead = (id) =>
+    setForm((f) => ({ ...f, leadIds: f.leadIds.includes(id) ? f.leadIds.filter((x) => x !== id) : [...f.leadIds, id] }));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(2,2,2,0.75)", backdropFilter: "blur(4px)", fontFamily: FONT }}>
+      <div className="w-full max-w-lg rounded-2xl max-h-[90vh] overflow-y-auto" style={{ background: C.bg2, border: `1px solid ${C.cardBorder}` }}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 sticky top-0 z-10" style={{ background: C.bg2, borderBottom: `1px solid ${C.cardBorder}` }}>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.accentSoft }}>
+              <FlaskConical size={15} color={C.accent} />
+            </div>
+            <h3 className="text-[15px] font-bold" style={{ color: C.primary }}>{initial.id ? "Editar teste" : "Novo teste de lead"}</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-md hover:bg-white/10"><X size={16} color={C.text} /></button>
+        </div>
+
+        <div className="px-5 pb-5 pt-4">
+          <Section label="Onde">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Funil">
+                <select style={inputStyle} value={form.funilId} onChange={(e) => setForm((f) => ({ ...f, funilId: e.target.value, leadIds: [] }))}>
+                  <option value="">selecione</option>
+                  {allFunis.map((f) => <option key={f.id} value={f.id}>{f.expertName} · {f.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Versão do corpo">
+                <input style={inputStyle} value={form.corpoVersao} onChange={set("corpoVersao")} placeholder="2" />
+              </Field>
+            </div>
+          </Section>
+
+          <Section label="Leads em teste">
+            {!form.funilId ? (
+              <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>selecione um funil primeiro</p>
+            ) : leadsDoFunil.length === 0 ? (
+              <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>nenhuma lead cadastrada para esse funil{form.corpoVersao ? ` na V${form.corpoVersao}` : ""}</p>
+            ) : (
+              <div className="flex flex-col gap-1 mb-2">
+                {leadsDoFunil.map((l) => (
+                  <button
+                    key={l.id}
+                    onClick={() => toggleLead(l.id)}
+                    className="flex items-center justify-between text-[12px] px-3 py-2 rounded-xl text-left"
+                    style={form.leadIds.includes(l.id)
+                      ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }
+                      : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <span>Lead #{l.leadNum} V{l.versao} {l.editor ? `· ${l.editor}` : ""}</span>
+                    {form.leadIds.includes(l.id) && <CheckCircle2 size={13} />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Field label="Divisão de tráfego (VSL principal / leads)">
+              <input style={inputStyle} value={form.split} onChange={set("split")} placeholder="90 / 5 / 5" />
+            </Field>
+          </Section>
+
+          <Section label="Rastreamento">
+            <div className="rounded-xl p-3 mb-3" style={{ background: C.accentSoft, border: `1px solid ${C.accentBorder}` }}>
+              <p className="text-[10px] font-bold uppercase tracking-wide mb-1.5" style={{ color: C.accent }}>Nome do teste</p>
+              <CopyName big name={testName(form, items, experts)} />
+              <p className="text-[10.5px] mt-2" style={{ color: C.text }}>
+                Use exatamente este nome no VTurb e na API/automação — é ele que liga a métrica ao teste.
+              </p>
+            </div>
+            <LinkField label="Link do player / teste no VTurb" Icon={ExternalLink} value={form.linkVturb} onChange={set("linkVturb")} />
+          </Section>
+
+          <Section label="Quem & quando">
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Solicitante"><input style={inputStyle} value={form.solicitante} onChange={set("solicitante")} placeholder="THI" /></Field>
+              <Field label="Status">
+                <select style={inputStyle} value={form.status} onChange={set("status")}>
+                  {TEST_STATUS_ORDER.map((s) => <option key={s} value={s}>{TEST_STATUS[s].label}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Início"><input type="date" style={inputStyle} value={form.dataInicio} onChange={set("dataInicio")} /></Field>
+              <Field label="Fim"><input type="date" style={inputStyle} value={form.dataFim} onChange={set("dataFim")} /></Field>
+            </div>
+            <Field label="Observações / resultado">
+              <input style={inputStyle} value={form.obs} onChange={set("obs")} placeholder="ex: lead 02 venceu, CTR 12% maior" />
+            </Field>
+          </Section>
+
+          <button
+            onClick={() => onSave(form)}
+            className="w-full mt-1 py-2.5 rounded-full font-bold text-[13px] transition-all"
+            style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 8px 24px -8px ${C.glow}` }}
+          >
+            Salvar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete }) {
+  const counts = { planejado: 0, rodando: 0, concluido: 0 };
+  (tests || []).forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
+  const sorted = [...(tests || [])].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <p className="text-[12px]" style={{ color: "#6B6B6B" }}>
+          Registro central de testes de lead — o mesmo nome vai no VTurb e na API, para as métricas baterem.
+        </p>
+        <button onClick={onAdd} className="flex items-center gap-1.5 text-[12.5px] font-bold px-4 py-2 rounded-full" style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 6px 18px -6px ${C.glow}` }}>
+          <Plus size={14} /> Novo teste
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        {TEST_STATUS_ORDER.map((k) => {
+          const s = TEST_STATUS[k];
+          const Icon = s.Icon;
+          return (
+            <div key={k} className="flex items-center gap-2 px-3.5 py-2 rounded-xl flex-1" style={{ background: `${s.color}0D`, border: `1px solid ${s.color}30` }}>
+              <Icon size={14} color={s.color} />
+              <div>
+                <p className="text-[15px] font-bold leading-tight" style={{ color: s.color }}>{counts[k]}</p>
+                <p className="text-[10px] uppercase tracking-wide" style={{ color: "#6B6B6B" }}>{s.label}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {sorted.length === 0 ? (
+        <div className="rounded-xl px-4 py-6 text-center text-[12px]" style={{ background: C.card, border: `1px solid ${C.cardBorder}`, color: "#454545" }}>
+          nenhum teste registrado ainda — clique em "Novo teste" quando alguém pedir um teste de lead
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          {sorted.map((t) => {
+            const leads = (t.leadIds || []).map((id) => items.find((i) => i.id === id)).filter(Boolean);
+            return (
+              <div key={t.id} className="group rounded-xl p-3.5" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <FlaskConical size={14} color={C.accent} />
+                  <CopyName big name={testName(t, items, experts)} />
+                  <TestStatusBadge status={t.status} />
+                  <span className="flex-1" />
+                  {t.linkVturb && (
+                    <a href={t.linkVturb} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] hover:underline" style={{ color: C.text }}>
+                      <ExternalLink size={12} color={C.accent} /> VTurb
+                    </a>
+                  )}
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => onEdit(t)} className="p-1 rounded-md hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
+                    <button onClick={() => onDelete(t.id)} className="p-1 rounded-md hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap text-[11.5px]" style={{ color: C.text }}>
+                  <span className="font-semibold" style={{ color: C.primary }}>{funilName(experts, t.funilId) || "funil?"} · V{t.corpoVersao || "?"}</span>
+                  <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum}`).join(" vs ") : "leads não selecionadas"}</span>
+                  {t.split && <span>tráfego {t.split}</span>}
+                  {t.solicitante && <span>pedido por {t.solicitante}</span>}
+                  {(t.dataInicio || t.dataFim) && (
+                    <span style={{ color: "#5C5C5C" }}>
+                      {t.dataInicio ? new Date(t.dataInicio + "T00:00:00").toLocaleDateString("pt-BR") : ""}
+                      {t.dataInicio && t.dataFim ? " → " : ""}
+                      {t.dataFim ? new Date(t.dataFim + "T00:00:00").toLocaleDateString("pt-BR") : ""}
+                    </span>
+                  )}
+                </div>
+                {t.obs && <p className="text-[11px] italic mt-1.5" style={{ color: "#6B6B6B" }}>{t.obs}</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Mini gráfico de barras (sparkline) ---------- */
+function MiniBars({ values, color }) {
+  const max = Math.max(1, ...values);
+  return (
+    <div className="flex items-end gap-[3px] h-8">
+      {values.map((v, i) => (
+        <span key={i} className="w-full rounded-sm" style={{ height: `${Math.max(8, (v / max) * 100)}%`, background: color, opacity: 0.35 + (i / values.length) * 0.65, minWidth: 3 }} />
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Card de KPI ---------- */
+function KpiCard({ label, value, sub, Icon, color, bars }) {
+  return (
+    <div className="rounded-2xl p-4 flex flex-col justify-between" style={{ background: C.card, border: `1px solid ${C.cardBorder}`, minHeight: 132 }}>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: C.dim }}>{label}</p>
+          <p className="text-[26px] font-extrabold leading-tight mt-1" style={{ color: C.primary }}>{value}</p>
+        </div>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${color}15`, border: `1px solid ${color}35` }}>
+          <Icon size={15} color={color} />
+        </div>
+      </div>
+      <div className="flex items-end justify-between gap-3 mt-2">
+        <span className="text-[11px]" style={{ color: C.dim }}>{sub}</span>
+        <div className="flex-1 max-w-[110px]"><MiniBars values={bars} color={color} /></div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Dashboard (visão inicial estilo SaaS) ---------- */
+function DashboardTab({ items, experts, tests, funilState, onGo, onAdd }) {
+  const editados = items.filter((i) => i.status === "editado").length;
+  const emEdicao = items.filter((i) => i.status === "em_edicao").length;
+  const aEditar = items.filter((i) => i.status === "a_editar").length;
+  const rodando = (tests || []).filter((t) => t.status === "rodando").length;
+  const totalFunis = experts.reduce((n, e) => n + e.funis.length, 0);
+  const noAr = Object.values(funilState || {}).filter((s) => s && (s.corpo || (s.leads || []).length)).length;
+  const pct = items.length ? Math.round((editados / items.length) * 100) : 0;
+
+  // atividade recente = itens ordenados por data de entrega/início
+  const recent = [...items]
+    .sort((a, b) => (b.dataEntrega || b.dataInicio || "").localeCompare(a.dataEntrega || a.dataInicio || ""))
+    .slice(0, 6);
+
+  const bars = (seed) => Array.from({ length: 8 }, (_, i) => ((seed * (i + 3)) % 7) + 2);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard label="Materiais editados" value={editados} sub={`${pct}% do total`} Icon={CheckCircle2} color={C.ok} bars={bars(3)} />
+        <KpiCard label="Em produção" value={emEdicao + aEditar} sub={`${emEdicao} em edição · ${aEditar} a editar`} Icon={Activity} color={C.gold} bars={bars(5)} />
+        <KpiCard label="Funis no ar" value={`${noAr}/${totalFunis}`} sub="rodando agora" Icon={Radio} color={C.accent} bars={bars(2)} />
+        <KpiCard label="Testes rodando" value={rodando} sub={`${(tests || []).length} no total`} Icon={FlaskConical} color="#6EA8FE" bars={bars(4)} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {/* Atividade recente */}
+        <div className="lg:col-span-2 rounded-2xl overflow-hidden" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+            <h3 className="text-[13px] font-bold" style={{ color: C.primary }}>Atividade recente</h3>
+            <button onClick={() => onGo("producao")} className="text-[11px] font-semibold" style={{ color: C.accent }}>Ver produção →</button>
+          </div>
+          {recent.length === 0 ? (
+            <div className="px-4 py-8 text-center text-[12px]" style={{ color: "#454545" }}>nada cadastrado ainda</div>
+          ) : (
+            recent.map((it) => {
+              const s = STATUS[it.status];
+              const Icon = s.Icon;
+              const label = it.type === "lead" ? `Lead #${it.leadNum || "?"}` : it.type === "vsl" ? `Corpo V${it.versao || "?"}` : (it.produto || "sem produto");
+              return (
+                <div key={it.id} className="flex items-center gap-3 px-4 py-2.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <Icon size={15} color={s.color} className="shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12.5px] font-semibold truncate" style={{ color: C.primary }}>{label}</p>
+                    <p className="text-[11px]" style={{ color: C.dim }}>{TYPE_LABEL[it.type]} · {[it.editor, it.copy].filter(Boolean).join(" / ") || "sem equipe"}</p>
+                  </div>
+                  <StatusBadge status={it.status} />
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Saúde da produção + experts */}
+        <div className="flex flex-col gap-3">
+          <div className="rounded-2xl p-4" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
+            <h3 className="text-[13px] font-bold mb-3" style={{ color: C.primary }}>Saúde da produção</h3>
+            {[["editado", editados], ["em_edicao", emEdicao], ["a_editar", aEditar]].map(([k, n]) => (
+              <div key={k} className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: STATUS[k].color }} />
+                <span className="text-[12px] flex-1" style={{ color: C.text }}>{STATUS[k].label}</span>
+                <span className="text-[12px] font-bold" style={{ color: C.primary }}>{n}</span>
+                <span className="text-[11px] w-9 text-right" style={{ color: C.dim }}>{items.length ? Math.round((n / items.length) * 100) : 0}%</span>
+              </div>
+            ))}
+            <div className="flex h-2 rounded-full overflow-hidden mt-3" style={{ background: "rgba(255,255,255,0.06)" }}>
+              {STATUS_ORDER.map((k) => {
+                const n = k === "editado" ? editados : k === "em_edicao" ? emEdicao : aEditar;
+                return items.length ? <span key={k} style={{ width: `${(n / items.length) * 100}%`, background: STATUS[k].color }} /> : null;
+              })}
+            </div>
+          </div>
+
+          <button onClick={onAdd} className="rounded-2xl p-4 text-left transition-all hover:brightness-110" style={{ background: C.accentSoft, border: `1px solid ${C.accentBorder}` }}>
+            <div className="flex items-center gap-2 mb-1">
+              <Plus size={15} color={C.accent} />
+              <span className="text-[13px] font-bold" style={{ color: C.accent }}>Cadastrar material</span>
+            </div>
+            <p className="text-[11px]" style={{ color: C.text }}>Adicione uma Lead, Corpo, Upsell ou Downsell à produção.</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Root ---------- */
+const NAV = [
+  { key: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+  { key: "producao", label: "Produção", Icon: Layers },
+  { key: "funil", label: "Funil Atual", Icon: Radio },
+  { key: "testes", label: "Testes", Icon: FlaskConical },
+];
+const TAB_INFO = {
+  dashboard: { title: "Dashboard", hint: "" },
+  producao: { title: "Produção", hint: "Tudo que já foi ou está sendo produzido — cadastre materiais e acompanhe o status de cada um." },
+  funil: { title: "Funil Atual", hint: "O que está no ar agora em cada funil, na ordem em que o cliente vê: Lead → Corpo → Upsell 1 → Downsell 1 → Upsell 2 → Downsell 2." },
+  testes: { title: "Testes", hint: "Registro dos testes de lead — o nome gerado aqui deve ser usado igual no VTurb e na API." },
+};
+
+export default function VSLProductionPanel() {
+  const [items, setItems, itemsReady] = useStorage("vslpanel:items", seedItems);
+  const [experts, setExperts, expertsReady] = useStorage("vslpanel:experts", seedExperts);
+  const [funilState, setFunilState, funilReady] = useStorage("vslpanel:funilstate", () => ({}));
+  const [slotLog, setSlotLog, slotLogReady] = useStorage("vslpanel:slotlog", () => []);
+  const [tests, setTests, testsReady] = useStorage("vslpanel:tests", () => []);
+  const [tab, setTab] = useState("dashboard");
+  const [modal, setModal] = useState(null);
+  const [testModal, setTestModal] = useState(null);
+  const [expertModal, setExpertModal] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState("");
+
+  const blank = () => ({
+    id: null, type: "vsl", expertId: "", funilId: "", produto: "", versao: "1",
+    leadNum: "", reaproveitada: false, origemVersao: "", tipo: "video", contexto: "",
+    posicao: "1", associar: true, associadoId: "",
+    editor: "", copy: "", status: "a_editar",
+    linkBruto: "", linkCopy: "", linkEditado: "", dataInicio: "", dataEntrega: "",
+  });
+
+  const save = (form) => {
+    if (form.id) setItems((prev) => prev.map((it) => (it.id === form.id ? form : it)));
+    else setItems((prev) => [...prev, { ...form, id: uid() }]);
+    setModal(null);
+  };
+  const remove = (id) => setItems((prev) => prev.filter((it) => it.id !== id));
+
+  const saveTest = (form) => {
+    if (form.id) setTests((prev) => prev.map((t) => (t.id === form.id ? form : t)));
+    else setTests((prev) => [...prev, { ...form, id: uid() }]);
+    setTestModal(null);
+  };
+  const removeTest = (id) => setTests((prev) => prev.filter((t) => t.id !== id));
+
+  const saveExpert = (ex) => {
+    setExperts((prev) => (prev.some((p) => p.id === ex.id) ? prev.map((p) => (p.id === ex.id ? ex : p)) : [...prev, ex]));
+    setExpertModal(null);
+  };
+  const removeExpert = (id) => {
+    const ex = experts.find((e) => e.id === id);
+    setExperts((prev) => prev.filter((e) => e.id !== id));
+    // limpa o funil atual e o histórico dos funis desse expert (não deixa lixo referenciando)
+    if (ex) {
+      const funilIds = new Set(ex.funis.map((f) => f.id));
+      setFunilState((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !funilIds.has(k))));
+      setSlotLog((prev) => (prev || []).filter((l) => !funilIds.has(l.funilId)));
+    }
+    setExpertModal(null);
+  };
+
+  if (!itemsReady || !funilReady || !slotLogReady || !testsReady || !expertsReady) return <div style={{ background: C.bg, minHeight: "100vh" }} />;
+
+  const go = (t) => { setTab(t); setNavOpen(false); };
+  const info = TAB_INFO[tab];
+
+  const SidebarInner = (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2.5 px-5 h-16 shrink-0" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: C.accentSoft, border: `1px solid ${C.accentBorder}`, boxShadow: `0 0 18px -6px ${C.glow}` }}>
+          <Layers size={16} color={C.accent} />
+        </div>
+        <span className="text-[16px] font-extrabold tracking-tight" style={{ color: C.primary }}>Produção<span style={{ color: C.accent }}>.</span></span>
+      </div>
+
+      <nav className="flex-1 px-3 py-4">
+        <p className="text-[9.5px] font-bold uppercase tracking-widest px-2.5 mb-2" style={{ color: C.dim }}>Menu</p>
+        {NAV.map((n) => {
+          const active = tab === n.key;
+          return (
+            <button
+              key={n.key}
+              onClick={() => go(n.key)}
+              className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl mb-1 text-[13px] font-semibold transition-all"
+              style={active
+                ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}`, boxShadow: `0 0 16px -8px ${C.glow}` }
+                : { background: "transparent", color: C.text, border: "1px solid transparent" }}
+            >
+              <n.Icon size={16} />
+              {n.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="p-3">
+        <div className="rounded-2xl p-4 mb-3" style={{ background: "linear-gradient(160deg, rgba(229,56,59,0.16), rgba(229,56,59,0.03))", border: `1px solid ${C.accentBorder}` }}>
+          <Sparkles size={16} color={C.accent} />
+          <p className="text-[12.5px] font-bold mt-1.5" style={{ color: C.primary }}>Fonte única de verdade</p>
+          <p className="text-[10.5px] mt-1 leading-snug" style={{ color: C.text }}>Cadastre uma vez na Produção; o resto do painel só referencia.</p>
+        </div>
+        <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-extrabold shrink-0" style={{ background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }}>PAZ</div>
+          <div className="min-w-0">
+            <p className="text-[12px] font-bold truncate" style={{ color: C.primary }}>PAZ Marketing</p>
+            <p className="text-[10.5px] truncate" style={{ color: C.dim }}>Creative Ops</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="w-full min-h-screen flex" style={{ background: C.bg, fontFamily: FONT, colorScheme: "dark" }}>
+      {/* Corrige menus suspensos (option) que ficavam branco no branco, e força controles nativos escuros */}
+      <style>{`
+        select, select option, select optgroup {
+          background-color: #141414 !important;
+          color: #EDEDED !important;
+        }
+        select option:checked, select option:hover {
+          background-color: #2a2a2a !important;
+        }
+        input[type="date"] { color-scheme: dark; }
+      `}</style>
+      {/* Sidebar desktop */}
+      <aside className="hidden lg:flex flex-col w-60 shrink-0 sticky top-0 h-screen" style={{ background: C.bg2, borderRight: `1px solid ${C.cardBorder}` }}>
+        {SidebarInner}
+      </aside>
+
+      {/* Sidebar mobile (drawer) */}
+      {navOpen && (
+        <div className="lg:hidden fixed inset-0 z-40 flex">
+          <div className="flex flex-col w-60 h-full" style={{ background: C.bg2, borderRight: `1px solid ${C.cardBorder}` }}>{SidebarInner}</div>
+          <div className="flex-1" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setNavOpen(false)} />
+        </div>
+      )}
+
+      {/* Coluna principal */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Topbar */}
+        <header className="sticky top-0 z-30 flex items-center gap-3 px-4 sm:px-6 h-16 shrink-0" style={{ background: "rgba(10,10,10,0.85)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${C.cardBorder}` }}>
+          <button className="lg:hidden p-2 rounded-lg hover:bg-white/10" onClick={() => setNavOpen(true)}><Menu size={18} color={C.text} /></button>
+
+          <div className="min-w-0">
+            {tab === "dashboard" ? (
+              <>
+                <h2 className="text-[15px] sm:text-[16px] font-extrabold leading-tight truncate" style={{ color: C.primary }}>Bem-vindo de volta 👋</h2>
+                <p className="text-[11px] hidden sm:block" style={{ color: C.dim }}>Aqui está o que está acontecendo na produção hoje.</p>
+              </>
+            ) : (
+              <h2 className="text-[15px] sm:text-[16px] font-extrabold leading-tight truncate" style={{ color: C.primary }}>{info.title}</h2>
+            )}
+          </div>
+
+          <div className="flex-1 hidden md:flex items-center justify-center px-4">
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-full w-full max-w-md" style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${C.cardBorder}` }}>
+              <Search size={14} color={C.dim} />
+              <input
+                value={globalSearch}
+                onChange={(e) => { setGlobalSearch(e.target.value); if (e.target.value) setTab("producao"); }}
+                placeholder="Buscar materiais, funis, produtos..."
+                className="bg-transparent outline-none text-[12.5px] flex-1"
+                style={{ color: C.primary, fontFamily: FONT }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 ml-auto md:ml-0">
+            <button className="p-2 rounded-lg hover:bg-white/10 relative" title="Sincronizado">
+              <Bell size={17} color={C.text} />
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full" style={{ background: C.ok }} />
+            </button>
+            <button
+              onClick={() => setModal(blank())}
+              className="flex items-center gap-1.5 text-[12.5px] font-bold px-3.5 sm:px-4 py-2 rounded-full shrink-0"
+              style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 6px 18px -6px ${C.glow}` }}
+            >
+              <Plus size={15} /> <span className="hidden sm:inline">Novo material</span>
+            </button>
+          </div>
+        </header>
+
+        <main className="p-4 sm:p-6 flex-1">
+          {info.hint && <p className="text-[12px] mb-4 -mt-1" style={{ color: C.dim }}>{info.hint}</p>}
+
+          {tab === "dashboard" ? (
+            <DashboardTab items={items} experts={experts} tests={tests} funilState={funilState} onGo={go} onAdd={() => setModal(blank())} />
+          ) : tab === "producao" ? (
+            <ProducaoTab items={items} experts={experts} globalSearch={globalSearch} onAdd={() => setModal(blank())} onEdit={setModal} onDelete={remove} onNewExpert={() => setExpertModal({})} onEditExpert={(ex) => setExpertModal(ex)} />
+          ) : tab === "funil" ? (
+            <FunilAtualTab experts={experts} items={items} funilState={funilState} setFunilState={setFunilState} slotLog={slotLog} setSlotLog={setSlotLog} />
+          ) : (
+            <TestesTab tests={tests} items={items} experts={experts} onAdd={() => setTestModal({})} onEdit={setTestModal} onDelete={removeTest} />
+          )}
+        </main>
+      </div>
+
+      {modal && <ItemModal initial={modal} experts={experts} items={items} onSave={save} onClose={() => setModal(null)} />}
+      {testModal && <TesteModal initial={testModal} experts={experts} items={items} onSave={saveTest} onClose={() => setTestModal(null)} />}
+      {expertModal && <ExpertModal initial={expertModal.id ? expertModal : null} items={items} onSave={saveExpert} onDelete={removeExpert} onClose={() => setExpertModal(null)} />}
+    </div>
+  );
+}
