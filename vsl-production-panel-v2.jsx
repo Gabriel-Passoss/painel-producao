@@ -1218,11 +1218,17 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
 
 /* ---------- Testes de Lead (registro p/ VTurb + API) ---------- */
 const TEST_STATUS = {
-  planejado: { label: "Planejado", color: "#8B8B8B", Icon: Clock },
-  rodando: { label: "Rodando", color: C.gold, Icon: Radio },
-  concluido: { label: "Concluído", color: C.ok, Icon: CheckCircle2 },
+  planejado: { label: "A testar", color: "#8B8B8B", Icon: Clock },
+  rodando: { label: "Em teste", color: C.gold, Icon: Radio },
+  concluido: { label: "Testado", color: C.ok, Icon: CheckCircle2 },
 };
 const TEST_STATUS_ORDER = ["planejado", "rodando", "concluido"];
+
+// lead(s) de um teste — aceita o novo formato (leadId único) e o antigo (leadIds em lista)
+function testLeads(test, items) {
+  const ids = test.leadId ? [test.leadId] : (test.leadIds || []);
+  return ids.map((id) => items.find((i) => i.id === id)).filter(Boolean);
+}
 
 // data no formato ddmmaa para a nomenclatura
 function ddmmaa(dateObj) {
@@ -1234,11 +1240,7 @@ function ddmmaa(dateObj) {
 // Ex.: TESTE_HFTC_V2_LEAD01-02_270726-280726
 function testName(test, items, experts) {
   const funil = slug(funilName(experts, test.funilId)) || "FUNIL";
-  const leads = (test.leadIds || [])
-    .map((id) => items.find((i) => i.id === id))
-    .filter(Boolean)
-    .map((l) => l.leadNum || "?")
-    .sort();
+  const leads = testLeads(test, items).map((l) => l.leadNum || "?").sort();
   const leadPart = leads.length ? `LEAD${leads.join("-")}` : "LEAD?";
   const ini = ddmmaa(test.dataInicio ? new Date(test.dataInicio + "T00:00:00") : new Date());
   const base = `TESTE_${funil}_V${test.corpoVersao || "?"}_${leadPart}_${ini}`;
@@ -1266,11 +1268,13 @@ function TestStatusBadge({ status }) {
   );
 }
 
-function TesteModal({ initial, experts, items, onSave, onClose }) {
+function TesteModal({ initial, experts, items, onSave, onCreateLead, onClose }) {
   const [form, setForm] = useState({
-    funilId: "", corpoVersao: "", leadIds: [],
+    funilId: "", corpoVersao: "", leadId: "",
     solicitante: "", linkVturb: "", status: "planejado", nomeManual: "",
     dataInicio: "", dataFim: "", obs: "",
+    // compat: se vier um teste antigo com leadIds, usa o primeiro
+    ...(initial && initial.leadIds && !initial.leadId ? { leadId: initial.leadIds[0] || "" } : {}),
     ...initial,
   });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -1280,11 +1284,20 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
   const funil = allFunis.find((f) => f.id === form.funilId);
   // versões de corpo já cadastradas para o funil (para selecionar)
   const versoesCorpo = [...new Set(items.filter((i) => i.type === "vsl" && i.funilId === form.funilId).map((c) => c.versao).filter(Boolean))].sort();
-  // todas as leads do funil — cada uma mostra sua versão, para escolher qual lead está rodando
+  // todas as leads do funil — cada uma mostra sua versão
   const leadsDoFunil = items.filter((i) => i.type === "lead" && i.funilId === form.funilId);
 
-  const toggleLead = (id) =>
-    setForm((f) => ({ ...f, leadIds: f.leadIds.includes(id) ? f.leadIds.filter((x) => x !== id) : [...f.leadIds, id] }));
+  // criação de nova lead na hora
+  const [novaLead, setNovaLead] = useState(null); // null | { leadNum, versao, editor }
+  const criarNovaLead = () => {
+    if (!form.funilId) return;
+    const nova = novaLead || {};
+    const num = (nova.leadNum || "").trim();
+    if (!num) return;
+    const id = onCreateLead({ funilId: form.funilId, leadNum: num, versao: (nova.versao || form.corpoVersao || "").trim(), editor: (nova.editor || "").trim() });
+    setForm((f) => ({ ...f, leadId: id }));
+    setNovaLead(null);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(2,2,2,0.75)", backdropFilter: "blur(4px)", fontFamily: FONT }}>
@@ -1303,7 +1316,7 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
           <Section label="Onde">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Funil">
-                <select style={inputStyle} value={form.funilId} onChange={(e) => setForm((f) => ({ ...f, funilId: e.target.value, leadIds: [] }))}>
+                <select style={inputStyle} value={form.funilId} onChange={(e) => setForm((f) => ({ ...f, funilId: e.target.value, leadId: "" }))}>
                   <option value="">selecione</option>
                   {allFunis.map((f) => <option key={f.id} value={f.id}>{f.expertName} · {f.name}</option>)}
                 </select>
@@ -1321,29 +1334,63 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
             </div>
           </Section>
 
-          <Section label="Lead(s) em teste">
+          <Section label="Lead em teste">
             {!form.funilId ? (
               <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>selecione um funil primeiro</p>
-            ) : leadsDoFunil.length === 0 ? (
-              <p className="text-[11.5px]" style={{ color: "#5C5C5C" }}>nenhuma lead cadastrada para esse funil — cadastre na aba Produção</p>
             ) : (
               <>
-                <p className="text-[10.5px] mb-1.5" style={{ color: "#5C5C5C" }}>Marque a versão da lead que está rodando (pode marcar mais de uma para A/B):</p>
+                <p className="text-[10.5px] mb-1.5" style={{ color: "#5C5C5C" }}>Escolha a lead que está sendo testada — ou crie uma nova:</p>
                 <div className="flex flex-col gap-1">
                   {leadsDoFunil.map((l) => (
                     <button
                       key={l.id}
-                      onClick={() => toggleLead(l.id)}
+                      onClick={() => setForm((f) => ({ ...f, leadId: f.leadId === l.id ? "" : l.id }))}
                       className="flex items-center justify-between text-[12px] px-3 py-2 rounded-xl text-left"
-                      style={form.leadIds.includes(l.id)
+                      style={form.leadId === l.id
                         ? { background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }
                         : { background: "rgba(255,255,255,0.03)", color: C.text, border: "1px solid rgba(255,255,255,0.08)" }}
                     >
                       <span>Lead #{l.leadNum} · <b>V{l.versao}</b>{l.editor ? ` · ${l.editor}` : ""}</span>
-                      {form.leadIds.includes(l.id) && <CheckCircle2 size={13} />}
+                      {form.leadId === l.id && <CheckCircle2 size={13} />}
                     </button>
                   ))}
+                  {leadsDoFunil.length === 0 && (
+                    <p className="text-[11px] mb-1" style={{ color: "#5C5C5C" }}>nenhuma lead cadastrada para esse funil ainda</p>
+                  )}
                 </div>
+
+                {novaLead === null ? (
+                  <button
+                    onClick={() => setNovaLead({ leadNum: "", versao: form.corpoVersao || "", editor: "" })}
+                    className="flex items-center gap-1.5 text-[11.5px] font-semibold mt-2"
+                    style={{ color: C.accent }}
+                  >
+                    <Plus size={13} /> Criar nova lead
+                  </button>
+                ) : (
+                  <div className="mt-2 rounded-xl p-3" style={{ background: "rgba(255,255,255,0.025)", border: `1px solid ${C.cardBorder}` }}>
+                    <p className="text-[10px] font-bold uppercase tracking-wide mb-2" style={{ color: C.accent }}>Nova lead</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <span className="block text-[9.5px] font-bold uppercase mb-1" style={{ color: "#5C5C5C" }}>Nº</span>
+                        <input style={{ ...inputStyle, marginBottom: 0 }} value={novaLead.leadNum} onChange={(e) => setNovaLead((n) => ({ ...n, leadNum: e.target.value }))} placeholder="03" />
+                      </div>
+                      <div>
+                        <span className="block text-[9.5px] font-bold uppercase mb-1" style={{ color: "#5C5C5C" }}>Versão</span>
+                        <input style={{ ...inputStyle, marginBottom: 0 }} value={novaLead.versao} onChange={(e) => setNovaLead((n) => ({ ...n, versao: e.target.value }))} placeholder="2" />
+                      </div>
+                      <div>
+                        <span className="block text-[9.5px] font-bold uppercase mb-1" style={{ color: "#5C5C5C" }}>Editor</span>
+                        <input style={{ ...inputStyle, marginBottom: 0 }} value={novaLead.editor} onChange={(e) => setNovaLead((n) => ({ ...n, editor: e.target.value }))} placeholder="opc." />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2.5">
+                      <button onClick={() => setNovaLead(null)} className="flex-1 py-1.5 rounded-full text-[11.5px] font-semibold" style={{ background: "rgba(255,255,255,0.05)", color: C.text }}>Cancelar</button>
+                      <button onClick={criarNovaLead} className="flex-1 py-1.5 rounded-full text-[11.5px] font-bold" style={{ background: C.accent, color: "#0A0A0A", opacity: (novaLead.leadNum || "").trim() ? 1 : 0.4 }}>Criar e selecionar</button>
+                    </div>
+                    <p className="text-[10px] mt-2" style={{ color: "#5C5C5C" }}>A lead também é cadastrada na Produção (fonte única).</p>
+                  </div>
+                )}
               </>
             )}
           </Section>
@@ -1374,7 +1421,7 @@ function TesteModal({ initial, experts, items, onSave, onClose }) {
               <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style={{ color: C.text }}>
                 <span>🏷️ <b>Produto</b>: funil</span>
                 <span>🎬 <b>Corpo</b>: versão</span>
-                <span>⚡ <b>Lead(s)</b> em teste</span>
+                <span>⚡ <b>Lead</b> em teste</span>
                 <span>▶️ <b>Quando rodou</b>: data de início</span>
                 <span>⏹️ <b>Quando parou</b>: entra ao clicar "Encerrar teste"</span>
               </div>
@@ -1433,9 +1480,9 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-        <p className="text-[12px] max-w-[560px]" style={{ color: "#6B6B6B" }}>
-          Registro central de testes de lead — o mesmo nome vai no VTurb e na API, para as métricas baterem.
-          Ao <b style={{ color: C.text }}>desativar um teste no VTurb, clique em "Encerrar teste" aqui também</b> para marcar que parou.
+        <p className="text-[12px] max-w-[580px]" style={{ color: "#6B6B6B" }}>
+          Registro dos testes de lead — para saber qual lead está em teste, qual já foi testada, em que data e
+          qual a nomenclatura no VTurb. Cada teste é de uma lead. Ao <b style={{ color: C.text }}>desativar no VTurb, clique em "Encerrar teste" aqui</b> para marcar que parou.
         </p>
         <button onClick={onAdd} className="flex items-center gap-1.5 text-[12.5px] font-bold px-4 py-2 rounded-full" style={{ background: C.accent, color: "#0A0A0A", boxShadow: `0 6px 18px -6px ${C.glow}` }}>
           <Plus size={14} /> Novo teste
@@ -1465,7 +1512,7 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
       ) : (
         <div className="flex flex-col gap-2.5">
           {sorted.map((t) => {
-            const leads = (t.leadIds || []).map((id) => items.find((i) => i.id === id)).filter(Boolean);
+            const leads = testLeads(t, items);
             return (
               <div key={t.id} className="group rounded-xl p-3.5" style={{ background: C.card, border: `1px solid ${C.cardBorder}` }}>
                 <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -1515,7 +1562,7 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
                 </div>
                 <div className="flex items-center gap-3 flex-wrap text-[11.5px]" style={{ color: C.text }}>
                   <span className="font-semibold" style={{ color: C.primary }}>{funilName(experts, t.funilId) || "funil?"} · V{t.corpoVersao || "?"}</span>
-                  <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum} V${l.versao}`).join(" vs ") : "leads não selecionadas"}</span>
+                  <span>{leads.length ? leads.map((l) => `Lead #${l.leadNum} V${l.versao}`).join(" · ") : "lead não selecionada"}</span>
                   {t.solicitante && <span>pedido por {t.solicitante}</span>}
                   {t.dataInicio && (
                     <span style={{ color: "#5C5C5C" }}>iniciou {new Date(t.dataInicio + "T00:00:00").toLocaleDateString("pt-BR")}</span>
@@ -1720,6 +1767,19 @@ export default function VSLProductionPanel() {
     setModal(null);
   };
   const remove = (id) => setItems((prev) => prev.filter((it) => it.id !== id));
+
+  // cria uma lead na hora (a partir do teste) e devolve o id — mantém a fonte única na Produção
+  const createLeadInline = ({ funilId, leadNum, versao, editor }) => {
+    const id = uid();
+    const expert = experts.find((e) => (e.funis || []).some((f) => f.id === funilId));
+    setItems((prev) => [...prev, {
+      id, type: "lead", expertId: expert ? expert.id : "", funilId,
+      versao: versao || "", leadNum: leadNum || "", reaproveitada: false, origemVersao: "",
+      editor: editor || "", copy: "", status: "editado",
+      linkBruto: "", linkCopy: "", linkEditado: "", dataInicio: "", dataEntrega: "",
+    }]);
+    return id;
+  };
 
   const saveTest = (form) => {
     if (form.id) setTests((prev) => prev.map((t) => (t.id === form.id ? form : t)));
@@ -1935,7 +1995,7 @@ export default function VSLProductionPanel() {
       </div>
 
       {modal && <ItemModal initial={modal} experts={experts} items={items} onSave={save} onClose={() => setModal(null)} />}
-      {testModal && <TesteModal initial={testModal} experts={experts} items={items} onSave={saveTest} onClose={() => setTestModal(null)} />}
+      {testModal && <TesteModal initial={testModal} experts={experts} items={items} onSave={saveTest} onCreateLead={createLeadInline} onClose={() => setTestModal(null)} />}
       {expertModal && <ExpertModal initial={expertModal.id ? expertModal : null} items={items} onSave={saveExpert} onDelete={removeExpert} onClose={() => setExpertModal(null)} />}
     </div>
   );
