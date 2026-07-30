@@ -52,7 +52,8 @@ function funilName(experts, funilId) {
 function officialName(item, items, experts) {
   const pair = (ed, cp) => [abbr3(ed), abbr3(cp)].filter(Boolean).join("-") || "?";
   if (item.type === "upsell" || item.type === "downsell") {
-    return `${item.type.toUpperCase()}_${slug(item.produto) || "PRODUTO"}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
+    // inclui a posição (1 ou 2) para saber qual upsell/downsell é: UPSELL1_..., DOWNSELL2_...
+    return `${item.type.toUpperCase()}${item.posicao || "1"}_${slug(item.produto) || "PRODUTO"}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
   }
   const funil = slug(funilName(experts, item.funilId)) || "FUNIL";
   if (item.type === "vsl") {
@@ -474,9 +475,28 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
                 </Field>
               </div>
             ) : (
-              <Field label="Produto">
-                <input style={inputStyle} value={form.produto || ""} onChange={set("produto")} placeholder="ex: Carteira Black" />
-              </Field>
+              <>
+                <Field label="Produto">
+                  <input style={inputStyle} value={form.produto || ""} onChange={set("produto")} placeholder="ex: Carteira Black" />
+                </Field>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <Field label="Expert do funil (opcional)">
+                    <select style={inputStyle} value={form.expertId || ""} onChange={(e) => setForm((f) => ({ ...f, expertId: e.target.value, funilId: "" }))}>
+                      <option value="">— nenhum —</option>
+                      {experts.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Funil (opcional)">
+                    <select style={inputStyle} value={form.funilId || ""} onChange={set("funilId")} disabled={!form.expertId}>
+                      <option value="">— nenhum —</option>
+                      {(expert?.funis || []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                <p className="text-[10px] mt-1" style={{ color: "#5C5C5C" }}>
+                  Vincule a um funil para o upsell/downsell aparecer dentro dele. Fica na biblioteca de qualquer forma e pode ser usado em outros funis.
+                </p>
+              </>
             )}
 
             <div className="grid grid-cols-2 gap-3 mt-3">
@@ -854,15 +874,25 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           const funilItems = expertItems.filter((i) => i.funilId === f.id);
           const corpoItems = funilItems.filter((i) => i.type === "vsl").sort((a, b) => (b.versao || "").localeCompare(a.versao || ""));
           const leadItems = funilItems.filter((i) => i.type === "lead").sort((a, b) => (b.versao || "").localeCompare(a.versao || "") || (a.leadNum || "").localeCompare(b.leadNum || ""));
+          // upsell/downsell vinculados a este funil
+          const upsellItems = reusableAll.filter((i) => i.type === "upsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
+          const downsellItems = reusableAll.filter((i) => i.type === "downsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
+          const total = funilItems.length + upsellItems.length + downsellItems.length;
           return (
             <div key={f.id} className="rounded-2xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${C.cardBorder}` }}>
               <div className="flex items-center gap-2 mb-3">
                 <span className="w-1 h-4 rounded-full" style={{ background: C.accent }} />
                 <p className="text-[14px] font-bold" style={{ color: C.primary }}>Funil {f.name}</p>
-                <span className="text-[10.5px]" style={{ color: C.dim }}>{funilItems.length} {funilItems.length === 1 ? "item" : "itens"}</span>
+                <span className="text-[10.5px]" style={{ color: C.dim }}>{total} {total === 1 ? "item" : "itens"}</span>
               </div>
               <TypeBlock title="Leads" Icon={Zap} items={leadItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma lead cadastrada ainda" groupLabel={(it) => `Corpo V${it.versao || "?"}`} />
               <TypeBlock title="Corpo VSL" Icon={Film} items={corpoItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum corpo cadastrado ainda" />
+              {upsellItems.length > 0 && (
+                <TypeBlock title="Upsell" Icon={ArrowUpCircle} items={upsellItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} />
+              )}
+              {downsellItems.length > 0 && (
+                <TypeBlock title="Downsell" Icon={ArrowDownCircle} items={downsellItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} />
+              )}
             </div>
           );
         })}
