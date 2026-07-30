@@ -89,12 +89,38 @@ const seedItems = () => ([
 
 /* ---------- Storage compartilhado ----------
    Ordem de preferência:
-   1. API do servidor (/api/kv) — dados compartilhados entre todo mundo
-   2. window.storage — quando rodando como artifact do claude.ai
-   3. localStorage — fallback local (só neste navegador)                  */
+   1. Supabase (se window.SUPABASE_URL/KEY estiverem definidos) — banco externo,
+      dados persistem mesmo entre deploys e são compartilhados por todos
+   2. API do servidor (/api/kv) — servidor Node com data.json
+   3. window.storage — quando rodando como artifact do claude.ai
+   4. localStorage — fallback local (só neste navegador)                  */
+
+// ---- Supabase (via REST/PostgREST, sem dependência) ----
+const SB_URL = (typeof window !== "undefined" && window.SUPABASE_URL) || "";
+const SB_KEY = (typeof window !== "undefined" && (window.SUPABASE_KEY || window.SUPABASE_ANON_KEY || window.SUPABASE_PUBLISHABLE_KEY)) || "";
+const useSupabase = !!(SB_URL && SB_KEY);
+const sbHeaders = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+
+async function sbGet(key) {
+  const r = await fetch(`${SB_URL}/rest/v1/kv?key=eq.${encodeURIComponent(key)}&select=value`, { headers: sbHeaders });
+  if (!r.ok) throw new Error("supabase get " + r.status);
+  const rows = await r.json();
+  return rows.length ? { value: rows[0].value } : null;
+}
+async function sbSet(key, value) {
+  const r = await fetch(`${SB_URL}/rest/v1/kv`, {
+    method: "POST",
+    headers: { ...sbHeaders, Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ key, value, updated_at: new Date().toISOString() }),
+  });
+  if (!r.ok) throw new Error("supabase set " + r.status);
+}
+
+// ---- servidor Node (/api/kv) ----
 const API_BASE = "/api/kv/";
 let remoteOk = null;
 async function isRemote() {
+  if (useSupabase) return false; // Supabase tem prioridade
   if (remoteOk !== null) return remoteOk;
   try {
     remoteOk = (await fetch("/api/health")).ok;
@@ -106,6 +132,7 @@ async function isRemote() {
 
 const storageBackend = {
   async get(key) {
+    if (useSupabase) return sbGet(key);
     if (await isRemote()) {
       const r = await fetch(API_BASE + encodeURIComponent(key));
       if (r.status === 404) return null;
@@ -117,6 +144,7 @@ const storageBackend = {
     return v == null ? null : { value: v };
   },
   async set(key, value) {
+    if (useSupabase) return sbSet(key, value);
     if (await isRemote()) {
       await fetch(API_BASE + encodeURIComponent(key), {
         method: "PUT",
@@ -168,7 +196,7 @@ function useStorage(key, seedFn) {
     let stopped = false;
     const t = setInterval(async () => {
       try {
-        if (!(await isRemote())) return;
+        if (!useSupabase && !(await isRemote())) return;
         // evita sobrescrever uma edição local recém-feita com dado antigo em trânsito
         if (Date.now() - lastWriteRef.current < POLL_MS + 5000) return;
         const res = await storageBackend.get(key);
