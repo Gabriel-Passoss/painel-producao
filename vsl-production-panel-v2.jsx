@@ -3,7 +3,8 @@ import {
   Plus, X, Link2, FileText, Video, Pencil, Trash2, ChevronDown, ChevronRight,
   Layers, Radio, Clock, CircleDot, CheckCircle2, ArrowRightLeft, Search,
   Film, ArrowUpCircle, ArrowDownCircle, Zap, Copy, Check, History, FlaskConical,
-  ExternalLink, LayoutDashboard, Bell, Menu, TrendingUp, Sparkles, Activity
+  ExternalLink, LayoutDashboard, Bell, Menu, TrendingUp, Sparkles, Activity,
+  ChevronLeft
 } from "lucide-react";
 
 /* ---------- Design tokens (Marko template, purple -> red) ---------- */
@@ -973,8 +974,10 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
 }
 
 /* ---------- Slot picker ---------- */
-function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange }) {
+function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange, onRename, autoLabel }) {
   const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(label);
   const currentIds = multi ? (current || []) : current ? [current] : [];
   const selectedItems = eligible.filter((it) => currentIds.includes(it.id));
 
@@ -991,7 +994,7 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
   const filled = selectedItems.length > 0;
   return (
     <div
-      className="rounded-2xl p-3 relative transition-all h-full"
+      className="group/slot rounded-2xl p-3 relative transition-all h-full"
       style={{
         background: filled ? "rgba(229,56,59,0.05)" : C.card,
         border: filled ? `1px solid ${C.accentBorder}` : "1px dashed rgba(255,255,255,0.14)",
@@ -1010,7 +1013,33 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
             {num}
           </span>
         )}
-        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: filled ? C.accent : "#5C5C5C" }}>{label}</p>
+        {renaming ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={() => { onRename(nameDraft.trim()); setRenaming(false); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { onRename(nameDraft.trim()); setRenaming(false); }
+              if (e.key === "Escape") { setRenaming(false); }
+            }}
+            className="flex-1 min-w-0 bg-transparent outline-none text-[10px] font-bold uppercase tracking-wide"
+            style={{ color: C.primary, borderBottom: `1px solid ${C.accentBorder}` }}
+          />
+        ) : (
+          <>
+            <p className="text-[10px] font-bold uppercase tracking-wide truncate" style={{ color: filled ? C.accent : "#5C5C5C" }} title={label}>{label}</p>
+            {onRename && (
+              <button
+                onClick={() => { setNameDraft(label); setRenaming(true); }}
+                className="p-0.5 rounded hover:bg-white/10 opacity-0 group-hover/slot:opacity-100 transition-opacity shrink-0"
+                title="Renomear card"
+              >
+                <Pencil size={9} color="#6B6B6B" />
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {selectedItems.length === 0 ? (
@@ -1063,8 +1092,40 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
 }
 
 /* ---------- Funil Atual tab ---------- */
-const EMPTY_SLOTS = { leads: [], corpo: null, upsell1: null, downsell1: null, upsell2: null, downsell2: null };
-const SLOT_LABEL = { leads: "Lead", corpo: "Corpo VSL", upsell1: "Upsell 1", downsell1: "Downsell 1", upsell2: "Upsell 2", downsell2: "Downsell 2" };
+const SLOT_KIND = {
+  lead: { base: "Lead", type: "lead" },
+  corpo: { base: "Corpo VSL", type: "vsl" },
+  upsell: { base: "Upsell", type: "upsell" },
+  downsell: { base: "Downsell", type: "downsell" },
+};
+const SLOT_KIND_ORDER = ["lead", "corpo", "upsell", "downsell"];
+// rótulos de logs no formato antigo (compat)
+const OLD_SLOT_LABEL = { leads: "Lead", corpo: "Corpo VSL", upsell1: "Upsell 1", downsell1: "Downsell 1", upsell2: "Upsell 2", downsell2: "Downsell 2" };
+
+// estrutura padrão dos cards de um funil (serve para a maioria)
+function defaultSlots(funilId) {
+  return [
+    { id: `${funilId}::lead`, kind: "lead", value: [] },
+    { id: `${funilId}::corpo`, kind: "corpo", value: null },
+    { id: `${funilId}::up1`, kind: "upsell", value: null },
+    { id: `${funilId}::down1`, kind: "downsell", value: null },
+    { id: `${funilId}::up2`, kind: "upsell", value: null },
+    { id: `${funilId}::down2`, kind: "downsell", value: null },
+  ];
+}
+
+// rótulos com numeração por tipo (Upsell 1, Upsell 2, Downsell 1...)
+function slotLabels(slots) {
+  const totals = {};
+  slots.forEach((s) => { totals[s.kind] = (totals[s.kind] || 0) + 1; });
+  const counts = {};
+  return slots.map((s) => {
+    counts[s.kind] = (counts[s.kind] || 0) + 1;
+    if (s.kind === "corpo") return "Corpo VSL";
+    if (s.kind === "lead") return totals.lead > 1 ? `Lead ${counts.lead}` : "Lead";
+    return `${SLOT_KIND[s.kind].base} ${counts[s.kind]}`;
+  });
+}
 
 // "quanto tempo rodou" em formato curto
 function fmtDur(ms) {
@@ -1089,15 +1150,35 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
   const editado = items.filter((i) => i.status === "editado");
   const [histOpen, setHistOpen] = useState({});
 
-  const getSlots = (funilId) => funilState[funilId] || EMPTY_SLOTS;
+  // cards de um funil: usa o layout salvo, migra o formato antigo ou cai no padrão
+  const getSlots = (funilId) => {
+    const st = funilState[funilId];
+    if (st && Array.isArray(st.slots)) return st.slots;
+    const base = defaultSlots(funilId);
+    if (st) {
+      base[0].value = st.leads || [];
+      base[1].value = st.corpo || null;
+      base[2].value = st.upsell1 || null;
+      base[3].value = st.downsell1 || null;
+      base[4].value = st.upsell2 || null;
+      base[5].value = st.downsell2 || null;
+    }
+    return base;
+  };
+  const writeSlots = (funilId, slots) => setFunilState((prev) => ({ ...prev, [funilId]: { slots } }));
 
-  const updateSlot = (funilId, slot, value) => {
-    const cur = funilState[funilId] || EMPTY_SLOTS;
-    const before = cur[slot];
+  const updateSlotValue = (funilId, slotId, value) => {
+    const slots = getSlots(funilId);
+    const labels = slotLabels(slots);
+    const idx = slots.findIndex((s) => s.id === slotId);
+    if (idx < 0) return;
+    const slot = slots[idx];
+    const label = slot.name || labels[idx];
+    const before = slot.value;
 
-    // Registro automático de troca (briefing 5.2): item anterior, item novo, data
+    // Registro automático de troca: item anterior, item novo, data
     const entries = [];
-    if (slot === "leads") {
+    if (slot.kind === "lead") {
       const prevIds = before || [];
       const nextIds = value || [];
       nextIds.filter((id) => !prevIds.includes(id)).forEach((id) => entries.push({ fromId: null, toId: id }));
@@ -1107,23 +1188,36 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
     }
     if (entries.length) {
       setSlotLog((log) => [
-        ...entries.map((en) => ({ id: uid(), date: new Date().toISOString(), funilId, slot, ...en })),
+        ...entries.map((en) => ({ id: uid(), date: new Date().toISOString(), funilId, slotLabel: label, ...en })),
         ...(log || []),
       ]);
     }
-
-    setFunilState((prev) => {
-      const c = prev[funilId] || EMPTY_SLOTS;
-      return { ...prev, [funilId]: { ...c, [slot]: value } };
-    });
+    writeSlots(funilId, slots.map((s) => (s.id === slotId ? { ...s, value } : s)));
   };
 
-  // por quanto tempo o item que saiu (fromId) ficou naquele slot
+  // renomear card: guarda um nome custom (vazio = volta ao automático)
+  const updateSlotName = (funilId, slotId, name, autoLabel) => {
+    const clean = (name || "").trim();
+    writeSlots(funilId, getSlots(funilId).map((s) => (s.id === slotId ? { ...s, name: clean && clean !== autoLabel ? clean : undefined } : s)));
+  };
+  const addSlot = (funilId, kind) => writeSlots(funilId, [...getSlots(funilId), { id: uid(), kind, value: kind === "lead" ? [] : null }]);
+  const removeSlot = (funilId, slotId) => writeSlots(funilId, getSlots(funilId).filter((s) => s.id !== slotId));
+  const moveSlot = (funilId, slotId, dir) => {
+    const slots = [...getSlots(funilId)];
+    const i = slots.findIndex((s) => s.id === slotId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= slots.length) return;
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+    writeSlots(funilId, slots);
+  };
+
+  const slotKey = (l) => l.slotLabel || l.slot;
+  // por quanto tempo o item que saiu (fromId) ficou naquele card
   const runtimeFor = (arr, idx) => {
     const e = arr[idx];
     if (!e.fromId) return null;
     for (let j = idx + 1; j < arr.length; j++) {
-      if (arr[j].slot === e.slot && arr[j].toId === e.fromId) {
+      if (slotKey(arr[j]) === slotKey(e) && arr[j].toId === e.fromId) {
         return new Date(e.date) - new Date(arr[j].date);
       }
     }
@@ -1162,7 +1256,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="leading-snug">
-                      <span className="font-semibold" style={{ color: "#7B7B7B" }}>{SLOT_LABEL[l.slot]}: </span>
+                      <span className="font-semibold" style={{ color: "#7B7B7B" }}>{l.slotLabel || OLD_SLOT_LABEL[l.slot] || l.slot}: </span>
                       {act.key === "add" && <span style={{ color: C.primary }}>{itemLabel(to, experts)}</span>}
                       {act.key === "rem" && <span style={{ color: C.primary }}>{itemLabel(from, experts)}</span>}
                       {act.key === "sub" && (
@@ -1199,40 +1293,46 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
           <div className="grid grid-cols-1 gap-4">
             {ex.funis.map((f) => {
               const slots = getSlots(f.id);
-              const leadsEligible = editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id);
-              const corpoEligible = editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id);
-              const upsellEligible = editado.filter((i) => i.type === "upsell");
-              const downsellEligible = editado.filter((i) => i.type === "downsell");
-              const slotDefs = [
-                { key: "leads", label: "Lead", multi: true, current: slots.leads, eligible: leadsEligible },
-                { key: "corpo", label: "Corpo VSL", current: slots.corpo, eligible: corpoEligible },
-                { key: "upsell1", label: "Upsell 1", current: slots.upsell1, eligible: upsellEligible },
-                { key: "downsell1", label: "Downsell 1", current: slots.downsell1, eligible: downsellEligible },
-                { key: "upsell2", label: "Upsell 2", current: slots.upsell2, eligible: upsellEligible },
-                { key: "downsell2", label: "Downsell 2", current: slots.downsell2, eligible: downsellEligible },
-              ];
-              const filledCount = slotDefs.filter((sd) => (sd.multi ? (sd.current || []).length > 0 : !!sd.current)).length;
+              const labels = slotLabels(slots);
+              const eligibleFor = (kind) => {
+                if (kind === "lead") return editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id);
+                if (kind === "corpo") return editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id);
+                if (kind === "upsell") return editado.filter((i) => i.type === "upsell");
+                return editado.filter((i) => i.type === "downsell");
+              };
+              const filledCount = slots.filter((s) => (s.kind === "lead" ? (s.value || []).length > 0 : !!s.value)).length;
               return (
                 <div key={f.id} className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${C.cardBorder}` }}>
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[13px] font-bold" style={{ color: C.primary }}>{f.name}</p>
                     <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: filledCount > 0 ? C.ok : "#454545" }}>
                       <span className="w-1.5 h-1.5 rounded-full" style={{ background: filledCount > 0 ? C.ok : "#454545" }} />
-                      {filledCount}/6 no ar
+                      {filledCount}/{slots.length} no ar
                     </span>
                   </div>
                   <div className="flex items-stretch gap-1.5 flex-wrap">
-                    {slotDefs.map((sd, i) => (
-                      <React.Fragment key={sd.key}>
-                        {i > 0 && (
-                          <div className="hidden xl:flex items-center shrink-0">
-                            <ChevronRight size={13} color="#3E3E3E" />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-[150px]">
-                          <SlotPicker label={sd.label} num={i + 1} multi={sd.multi} current={sd.current} eligible={sd.eligible} onChange={(v) => updateSlot(f.id, sd.key, v)} />
+                    {slots.map((s, i) => (
+                      <div key={s.id} className="flex-1 min-w-[150px] flex flex-col gap-1">
+                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s.kind)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} />
+                        <div className="flex items-center justify-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
+                          <button onClick={() => moveSlot(f.id, s.id, -1)} disabled={i === 0} title="Mover para a esquerda" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={12} color={C.text} /></button>
+                          <button onClick={() => removeSlot(f.id, s.id)} title="Remover card" className="p-1 rounded-md hover:bg-white/10"><Trash2 size={11} color={C.text} /></button>
+                          <button onClick={() => moveSlot(f.id, s.id, 1)} disabled={i === slots.length - 1} title="Mover para a direita" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronRight size={12} color={C.text} /></button>
                         </div>
-                      </React.Fragment>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "#5C5C5C" }}>Adicionar card:</span>
+                    {SLOT_KIND_ORDER.map((k) => (
+                      <button
+                        key={k}
+                        onClick={() => addSlot(f.id, k)}
+                        className="flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-full"
+                        style={{ background: "rgba(255,255,255,0.03)", color: C.text, border: "1px dashed rgba(255,255,255,0.15)" }}
+                      >
+                        <Plus size={10} /> {SLOT_KIND[k].base}
+                      </button>
                     ))}
                   </div>
                   {renderHistory(f.id)}
