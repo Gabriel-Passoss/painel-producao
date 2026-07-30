@@ -674,6 +674,7 @@ function Tag({ children, color }) {
 }
 
 function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
   const Icon = TYPE_ICON[item.type];
   const isTsl = item.type === "downsell" && item.tipo === "tsl";
   const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado;
@@ -740,10 +741,18 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
 
       <StatusBadge status={item.status} />
 
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-        <button onClick={() => onEdit(item)} title="Editar" className="p-1.5 rounded-lg hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
-        <button onClick={() => onDelete(item.id)} title="Excluir" className="p-1.5 rounded-lg hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
-      </div>
+      {confirming ? (
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-semibold hidden sm:inline" style={{ color: C.accent }}>Excluir?</span>
+          <button onClick={() => { onDelete(item.id); setConfirming(false); }} className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ background: C.accent, color: "#0A0A0A" }}>Sim, excluir</button>
+          <button onClick={() => setConfirming(false)} className="text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: C.text }}>Cancelar</button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <button onClick={() => onEdit(item)} title="Editar" className="p-1.5 rounded-lg hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
+          <button onClick={() => setConfirming(true)} title="Excluir" className="p-1.5 rounded-lg hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1631,6 +1640,7 @@ function TesteModal({ initial, experts, items, onSave, onCreateLead, onClose }) 
 }
 
 function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate }) {
+  const [confirmDelId, setConfirmDelId] = useState(null);
   const counts = { planejado: 0, rodando: 0, concluido: 0 };
   (tests || []).forEach((t) => { counts[t.status] = (counts[t.status] || 0) + 1; });
   const sorted = [...(tests || [])].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
@@ -1713,10 +1723,18 @@ function TestesTab({ tests, items, experts, onAdd, onEdit, onDelete, onUpdate })
                       <Radio size={11} /> Reabrir
                     </button>
                   )}
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => onEdit(t)} className="p-1 rounded-md hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
-                    <button onClick={() => onDelete(t.id)} className="p-1 rounded-md hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
-                  </div>
+                  {confirmDelId === t.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-semibold hidden sm:inline" style={{ color: C.accent }}>Excluir?</span>
+                      <button onClick={() => { onDelete(t.id); setConfirmDelId(null); }} className="text-[11px] font-bold px-2.5 py-1 rounded-full" style={{ background: C.accent, color: "#0A0A0A" }}>Sim, excluir</button>
+                      <button onClick={() => setConfirmDelId(null)} className="text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: C.text }}>Cancelar</button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => onEdit(t)} className="p-1 rounded-md hover:bg-white/10"><Pencil size={12} color={C.text} /></button>
+                      <button onClick={() => setConfirmDelId(t.id)} className="p-1 rounded-md hover:bg-white/10"><Trash2 size={12} color={C.text} /></button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 flex-wrap text-[11.5px]" style={{ color: C.text }}>
                   <span className="font-semibold" style={{ color: C.primary }}>{funilName(experts, t.funilId) || "funil?"} · V{t.corpoVersao || "?"}</span>
