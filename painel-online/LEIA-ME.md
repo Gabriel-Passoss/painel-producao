@@ -1,9 +1,38 @@
 # Painel de Produção — versão online (dados compartilhados)
 
-Todo mundo que abrir o link vê e edita **a mesma base de dados**, guardada no servidor.
+Todo mundo que abrir o link vê e edita **a mesma base de dados**.
 O painel também se atualiza sozinho a cada 15 segundos para puxar o que os outros mudaram.
 
 Não tem dependências para instalar — é só Node.js puro.
+
+---
+
+## 🟢 Onde os dados ficam salvos (Supabase — já configurado)
+
+O painel guarda os dados no **Supabase** (banco externo), definido em `public/config.js`:
+
+```js
+window.SUPABASE_URL = "https://....supabase.co";
+window.SUPABASE_KEY = "sb_publishable_...";
+```
+
+Vantagem: os dados ficam no banco, **independente do deploy** — pode atualizar/redeployar o site à
+vontade que **nada é perdido**. E como é o front-end que fala com o Supabase, funciona até em
+hospedagem estática (inclusive o site de teste do GitHub Pages).
+
+- Para **trocar de projeto Supabase**, é só editar `public/config.js`.
+- Para **voltar ao modo servidor** (usar o `data.json` em vez do Supabase), deixe as duas variáveis
+  vazias (`""`) em `config.js`.
+- Tabela usada no Supabase: `kv (key text primary key, value text, updated_at timestamptz)` com uma
+  policy de acesso liberado (RLS). Backup = exportar essa tabela no painel do Supabase.
+
+> Observação de segurança: a chave em `config.js` é a **publishable** (feita para ficar no cliente).
+> Como o repositório é público, ela fica visível — para uso interno sem login é aceitável, mas quem
+> tiver a chave consegue ler/gravar. Se precisar travar, dá para deixar o repositório privado, apertar
+> a policy de RLS ou adicionar uma autenticação depois.
+
+O resto abaixo (servidor Node + `data.json`) continua valendo como **alternativa/fallback**, caso um dia
+não queira usar o Supabase.
 
 ---
 
