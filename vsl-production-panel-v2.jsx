@@ -2015,7 +2015,7 @@ export default function VSLProductionPanel() {
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-extrabold shrink-0" style={{ background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }}>PAZ</div>
           <div className="min-w-0">
             <p className="text-[12px] font-bold truncate" style={{ color: C.primary }}>PAZ Marketing</p>
-            <p className="text-[10.5px] truncate" style={{ color: C.dim }}>Creative Ops · v1.1</p>
+            <p className="text-[10.5px] truncate" style={{ color: C.dim }}>Creative Ops</p>
           </div>
         </div>
       </div>
