@@ -2006,11 +2006,6 @@ export default function VSLProductionPanel() {
       </nav>
 
       <div className="p-3">
-        <div className="rounded-2xl p-4 mb-3" style={{ background: "linear-gradient(160deg, rgba(229,56,59,0.16), rgba(229,56,59,0.03))", border: `1px solid ${C.accentBorder}` }}>
-          <Sparkles size={16} color={C.accent} />
-          <p className="text-[12.5px] font-bold mt-1.5" style={{ color: C.primary }}>Fonte única de verdade</p>
-          <p className="text-[10.5px] mt-1 leading-snug" style={{ color: C.text }}>Cadastre uma vez na Produção; o resto do painel só referencia.</p>
-        </div>
         <div className="flex items-center gap-2.5 px-2 py-2 rounded-xl" style={{ background: "rgba(255,255,255,0.02)" }}>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-extrabold shrink-0" style={{ background: C.accentSoft, color: C.accent, border: `1px solid ${C.accentBorder}` }}>PAZ</div>
           <div className="min-w-0">
