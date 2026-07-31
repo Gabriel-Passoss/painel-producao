@@ -79,7 +79,7 @@ const seedExperts = () => ([
   { id: "gabriele", name: "Gabriele Nunes", funis: [{ id: "gabriele-aiva", name: "Aiva" }] },
   { id: "thay", name: "Thay Camilla", funis: [{ id: "thay-sofia", name: "Sofia" }] },
   { id: "jhon", name: "Jhon", funis: [{ id: "jhon-atmoz", name: "Atmoz" }] },
-  { id: "leandro", name: "Leandro", funis: [{ id: "leandro-conecta", name: "Conecta Plus" }] },
+  { id: "leandro", name: "Leandro", funis: [{ id: "leandro-conecta", name: "Conecta Cripto" }] },
 ]);
 
 const seedItems = () => ([
@@ -370,14 +370,20 @@ function ExpertModal({ initial, items, onSave, onDelete, onClose }) {
 
           <Section label="Funis">
             {funis.length === 0 && <p className="text-[11.5px] mb-2" style={{ color: "#5C5C5C" }}>nenhum funil ainda — adicione abaixo</p>}
+            {funis.length > 0 && <p className="text-[10px] mb-1.5" style={{ color: "#5C5C5C" }}>Edite o nome direto no campo. O funil "em uso" pode ser renomeado, mas não removido.</p>}
             <div className="flex flex-col gap-1.5 mb-3">
               {funis.map((f) => (
-                <div key={f.id} className="flex items-center justify-between px-3 py-2 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <span className="text-[12.5px]" style={{ color: C.primary }}>{f.name}</span>
+                <div key={f.id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <input
+                    value={f.name}
+                    onChange={(e) => setFunis((prev) => prev.map((x) => (x.id === f.id ? { ...x, name: e.target.value } : x)))}
+                    className="flex-1 bg-transparent outline-none text-[12.5px]"
+                    style={{ color: C.primary, fontFamily: FONT }}
+                  />
                   {usedFunilIds.has(f.id) ? (
-                    <span className="text-[10px]" style={{ color: "#5C5C5C" }}>em uso</span>
+                    <span className="text-[10px] shrink-0" style={{ color: "#5C5C5C" }}>em uso</span>
                   ) : (
-                    <button onClick={() => setFunis((prev) => prev.filter((x) => x.id !== f.id))} className="p-1 rounded-md hover:bg-white/10">
+                    <button onClick={() => setFunis((prev) => prev.filter((x) => x.id !== f.id))} title="Remover funil" className="p-1 rounded-md hover:bg-white/10 shrink-0">
                       <Trash2 size={12} color={C.text} />
                     </button>
                   )}
