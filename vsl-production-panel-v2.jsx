@@ -458,7 +458,12 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
   const isReusable = form.type === "upsell" || form.type === "downsell";
   const TypeIcon = TYPE_ICON[form.type] || Layers;
 
-  const candidatosAssociacao = items.filter((it) => it.type === form.type && it.posicao === "1" && it.id !== form.id);
+  // só Upsell/Downsell 1 do MESMO funil/expert (não puxa de outro funil)
+  const candidatosAssociacao = items.filter((it) =>
+    it.type === form.type && it.posicao === "1" && it.id !== form.id &&
+    (form.funilId ? it.funilId === form.funilId : true) &&
+    (form.expertId ? it.expertId === form.expertId : true)
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(2,2,2,0.75)", backdropFilter: "blur(4px)", fontFamily: FONT }}>
@@ -591,7 +596,7 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
                       <select style={inputStyle} value={form.associadoId} onChange={set("associadoId")}>
                         <option value="">selecione o {TYPE_LABEL[form.type]} 1</option>
                         {candidatosAssociacao.map((it) => (
-                          <option key={it.id} value={it.id}>{it.produto || "sem produto"} · V{it.versao}</option>
+                          <option key={it.id} value={it.id}>{it.produto || "sem produto"} · V{it.versao}{it.editor || it.copy ? ` · ${[it.editor, it.copy].filter(Boolean).join("-")}` : ""}</option>
                         ))}
                       </select>
                     )}
@@ -645,6 +650,7 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
             <LinkField label="Material bruto" Icon={Video} value={form.linkBruto} onChange={set("linkBruto")} />
             <LinkField label="Copy / roteiro" Icon={FileText} value={form.linkCopy} onChange={set("linkCopy")} />
             <LinkField label="Material editado" Icon={Link2} value={form.linkEditado} onChange={set("linkEditado")} />
+            <LinkField label="Página (URL)" Icon={ExternalLink} value={form.linkPagina} onChange={set("linkPagina")} />
           </Section>
 
           <Section label="Nomenclatura oficial">
@@ -683,7 +689,7 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const Icon = TYPE_ICON[item.type];
   const isTsl = item.type === "downsell" && item.tipo === "tsl";
-  const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado;
+  const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado || item.linkPagina;
   const s = STATUS[item.status];
   const linked = item.posicao === "2" && item.associar && item.associadoId
     ? allItems?.find((i) => i.id === item.associadoId)
@@ -740,6 +746,7 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
           <IconLink href={item.linkBruto} Icon={Video} label="Material bruto" />
           <IconLink href={item.linkCopy} Icon={FileText} label="Copy / roteiro" />
           <IconLink href={item.linkEditado} Icon={Link2} label="Material editado" />
+          <IconLink href={item.linkPagina} Icon={ExternalLink} label="Página" />
         </div>
       )}
 
@@ -983,7 +990,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-6">
             {experts.map((ex) => (
-              <ExpertOverviewCard key={ex.id} expert={ex} items={vslLikeAll} onOpen={() => setView(ex.id)} />
+              <ExpertOverviewCard key={ex.id} expert={ex} items={[...vslLikeAll, ...reusableAll]} onOpen={() => setView(ex.id)} />
             ))}
           </div>
           <div className="flex items-center gap-2 mb-2 mt-2">
@@ -1094,11 +1101,18 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
               <span className="truncate">
                 {it.type === "lead" ? `Lead #${it.leadNum}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
               </span>
-              <span className="flex items-center gap-1 ml-1 shrink-0">
+              <span className="flex items-center gap-1.5 ml-1 shrink-0">
+                {it.linkBruto && (
+                  <a href={it.linkBruto} target="_blank" rel="noreferrer" title="Material bruto" onClick={(e) => e.stopPropagation()}><Video size={11} color={C.accent} /></a>
+                )}
+                {it.linkCopy && (
+                  <a href={it.linkCopy} target="_blank" rel="noreferrer" title="Copy / roteiro" onClick={(e) => e.stopPropagation()}><FileText size={11} color={C.accent} /></a>
+                )}
                 {it.linkEditado && (
-                  <a href={it.linkEditado} target="_blank" rel="noreferrer" title="Abrir material editado" onClick={(e) => e.stopPropagation()}>
-                    <ExternalLink size={11} color={C.accent} />
-                  </a>
+                  <a href={it.linkEditado} target="_blank" rel="noreferrer" title="Material editado" onClick={(e) => e.stopPropagation()}><Link2 size={11} color={C.accent} /></a>
+                )}
+                {it.linkPagina && (
+                  <a href={it.linkPagina} target="_blank" rel="noreferrer" title="Página" onClick={(e) => e.stopPropagation()}><ExternalLink size={11} color={C.accent} /></a>
                 )}
                 <button onClick={() => toggle(it.id)}><X size={11} color={C.accent} /></button>
               </span>
@@ -1940,7 +1954,7 @@ export default function VSLProductionPanel() {
     leadNum: "", reaproveitada: false, origemVersao: "", tipo: "video", contexto: "",
     posicao: "1", associar: true, associadoId: "",
     editor: "", copy: "", status: "a_editar",
-    linkBruto: "", linkCopy: "", linkEditado: "", dataInicio: "", dataEntrega: "",
+    linkBruto: "", linkCopy: "", linkEditado: "", linkPagina: "", dataInicio: "", dataEntrega: "",
   });
 
   const save = (form) => {
