@@ -1024,7 +1024,42 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
 }
 
 /* ---------- Slot picker ---------- */
-function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange, onRename, autoLabel }) {
+// Campo para colar/editar a URL da página direto no card do Funil Atual
+function PaginaField({ item, onSetPagina }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(item.linkPagina || "");
+  useEffect(() => { setVal(item.linkPagina || ""); }, [item.linkPagina]);
+  const salvar = () => { onSetPagina(item.id, val.trim()); setEditing(false); };
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+        <input
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") salvar(); if (e.key === "Escape") setEditing(false); }}
+          placeholder="cole a URL da página"
+          className="flex-1 min-w-0 bg-transparent outline-none text-[10.5px]"
+          style={{ color: C.primary, borderBottom: `1px solid ${C.accentBorder}` }}
+        />
+        <button onClick={salvar} className="text-[10px] font-bold shrink-0" style={{ color: C.accent }}>ok</button>
+      </div>
+    );
+  }
+  return item.linkPagina ? (
+    <div className="flex items-center gap-1 mt-1">
+      <ExternalLink size={9} color={C.accent} className="shrink-0" />
+      <a href={item.linkPagina} target="_blank" rel="noreferrer" className="truncate text-[10px] hover:underline" style={{ color: C.text }} onClick={(e) => e.stopPropagation()}>{item.linkPagina.replace(/^https?:\/\//, "")}</a>
+      <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} title="Editar URL da página" className="shrink-0"><Pencil size={8} color="#6B6B6B" /></button>
+    </div>
+  ) : (
+    <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} className="flex items-center gap-1 mt-1 text-[10px] font-semibold" style={{ color: "#6B6B6B" }}>
+      <Plus size={9} /> URL da página
+    </button>
+  );
+}
+
+function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange, onRename, autoLabel, onSetPagina }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(label);
@@ -1097,25 +1132,25 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
       ) : (
         <div className="flex flex-col gap-1 mb-2">
           {selectedItems.map((it) => (
-            <div key={it.id} className="flex items-center justify-between text-[11.5px] px-2 py-1 rounded-lg" style={{ background: C.accentSoft, color: C.primary }}>
-              <span className="truncate">
-                {it.type === "lead" ? `Lead #${it.leadNum}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
-              </span>
-              <span className="flex items-center gap-1.5 ml-1 shrink-0">
-                {it.linkBruto && (
-                  <a href={it.linkBruto} target="_blank" rel="noreferrer" title="Material bruto" onClick={(e) => e.stopPropagation()}><Video size={11} color={C.accent} /></a>
-                )}
-                {it.linkCopy && (
-                  <a href={it.linkCopy} target="_blank" rel="noreferrer" title="Copy / roteiro" onClick={(e) => e.stopPropagation()}><FileText size={11} color={C.accent} /></a>
-                )}
-                {it.linkEditado && (
-                  <a href={it.linkEditado} target="_blank" rel="noreferrer" title="Material editado" onClick={(e) => e.stopPropagation()}><Link2 size={11} color={C.accent} /></a>
-                )}
-                {it.linkPagina && (
-                  <a href={it.linkPagina} target="_blank" rel="noreferrer" title="Página" onClick={(e) => e.stopPropagation()}><ExternalLink size={11} color={C.accent} /></a>
-                )}
-                <button onClick={() => toggle(it.id)}><X size={11} color={C.accent} /></button>
-              </span>
+            <div key={it.id} className="px-2 py-1.5 rounded-lg" style={{ background: C.accentSoft, color: C.primary }}>
+              <div className="flex items-center justify-between text-[11.5px]">
+                <span className="truncate">
+                  {it.type === "lead" ? `Lead #${it.leadNum}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
+                </span>
+                <span className="flex items-center gap-1.5 ml-1 shrink-0">
+                  {it.linkBruto && (
+                    <a href={it.linkBruto} target="_blank" rel="noreferrer" title="Material bruto" onClick={(e) => e.stopPropagation()}><Video size={11} color={C.accent} /></a>
+                  )}
+                  {it.linkCopy && (
+                    <a href={it.linkCopy} target="_blank" rel="noreferrer" title="Copy / roteiro" onClick={(e) => e.stopPropagation()}><FileText size={11} color={C.accent} /></a>
+                  )}
+                  {it.linkEditado && (
+                    <a href={it.linkEditado} target="_blank" rel="noreferrer" title="Material editado" onClick={(e) => e.stopPropagation()}><Link2 size={11} color={C.accent} /></a>
+                  )}
+                  <button onClick={() => toggle(it.id)}><X size={11} color={C.accent} /></button>
+                </span>
+              </div>
+              {onSetPagina && <PaginaField item={it} onSetPagina={onSetPagina} />}
             </div>
           ))}
         </div>
@@ -1203,7 +1238,7 @@ function logAction(l) {
   return { key: "rem", label: "Removido", color: C.accent };
 }
 
-function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, setSlotLog }) {
+function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, setSlotLog, onSetPagina }) {
   const editado = items.filter((i) => i.status === "editado");
   const [histOpen, setHistOpen] = useState({});
 
@@ -1370,7 +1405,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                   <div className="flex items-stretch gap-1.5 flex-wrap">
                     {slots.map((s, i) => (
                       <div key={s.id} className="flex-1 min-w-[150px] flex flex-col gap-1">
-                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s.kind)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} />
+                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s.kind)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
                         <div className="flex items-center justify-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
                           <button onClick={() => moveSlot(f.id, s.id, -1)} disabled={i === 0} title="Mover para a esquerda" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={12} color={C.text} /></button>
                           <button onClick={() => removeSlot(f.id, s.id)} title="Remover card" className="p-1 rounded-md hover:bg-white/10"><Trash2 size={11} color={C.text} /></button>
@@ -1977,6 +2012,9 @@ export default function VSLProductionPanel() {
     return id;
   };
 
+  // define/edita a URL da página de um item direto pelo Funil Atual
+  const setItemPagina = (id, url) => setItems((prev) => prev.map((it) => (it.id === id ? { ...it, linkPagina: (url || "").trim() } : it)));
+
   const saveTest = (form) => {
     if (form.id) setTests((prev) => prev.map((t) => (t.id === form.id ? form : t)));
     else {
@@ -2178,7 +2216,7 @@ export default function VSLProductionPanel() {
           ) : tab === "producao" ? (
             <ProducaoTab items={items} experts={experts} globalSearch={globalSearch} onAdd={() => setModal(blank())} onEdit={setModal} onDelete={remove} onNewExpert={() => setExpertModal({})} onEditExpert={(ex) => setExpertModal(ex)} />
           ) : tab === "funil" ? (
-            <FunilAtualTab experts={experts} items={items} funilState={funilState} setFunilState={setFunilState} slotLog={slotLog} setSlotLog={setSlotLog} />
+            <FunilAtualTab experts={experts} items={items} funilState={funilState} setFunilState={setFunilState} slotLog={slotLog} setSlotLog={setSlotLog} onSetPagina={setItemPagina} />
           ) : (
             <TestesTab tests={tests} items={items} experts={experts} onAdd={() => setTestModal({})} onEdit={setTestModal} onDelete={removeTest} onUpdate={updateTest} />
           )}
