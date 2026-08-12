@@ -1207,8 +1207,9 @@ const SLOT_KIND = {
   corpo: { base: "Corpo VSL", type: "vsl" },
   upsell: { base: "Upsell", type: "upsell" },
   downsell: { base: "Downsell", type: "downsell" },
+  obrigado: { base: "Obrigado", type: "obrigado" },
 };
-const SLOT_KIND_ORDER = ["lead", "corpo", "upsell", "downsell"];
+const SLOT_KIND_ORDER = ["lead", "corpo", "upsell", "downsell", "obrigado"];
 // rótulos de logs no formato antigo (compat)
 const OLD_SLOT_LABEL = { leads: "Lead", corpo: "Corpo VSL", upsell1: "Upsell 1", downsell1: "Downsell 1", upsell2: "Upsell 2", downsell2: "Downsell 2" };
 
@@ -1422,7 +1423,8 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                 if (slot.kind === "lead") return editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id && livre(i));
                 if (slot.kind === "corpo") return editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id && livre(i));
                 if (slot.kind === "upsell") return editado.filter((i) => i.type === "upsell" && doExpert(i) && livre(i));
-                return editado.filter((i) => i.type === "downsell" && doExpert(i) && livre(i));
+                if (slot.kind === "downsell") return editado.filter((i) => i.type === "downsell" && doExpert(i) && livre(i));
+                return editado.filter((i) => i.type === "obrigado" && doExpert(i) && livre(i));
               };
               const filledCount = slots.filter((s) => (s.kind === "lead" ? (s.value || []).length > 0 : !!s.value)).length;
               return (
