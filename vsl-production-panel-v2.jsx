@@ -36,6 +36,11 @@ const STATUS_ORDER = ["a_editar", "em_edicao", "editado"];
 const TYPE_LABEL = { vsl: "Corpo VSL", lead: "Lead", upsell: "Upsell", downsell: "Downsell", obrigado: "Obrigado" };
 const TYPE_ICON = { vsl: Film, lead: Zap, upsell: ArrowUpCircle, downsell: ArrowDownCircle, obrigado: Sparkles };
 
+// tipos que sao "oferta": cadastrados por produto, com expert/funil opcionais
+const isOfertaType = (t) => t === "upsell" || t === "downsell" || t === "obrigado";
+// so upsell/downsell existem em posicao 1 e 2, com o 2 podendo seguir o 1
+const temPosicaoType = (t) => t === "upsell" || t === "downsell";
+
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 /* ---------- Nomenclatura oficial (briefing §3) ---------- */
@@ -459,9 +464,9 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
   const expert = experts.find((e) => e.id === form.expertId);
   const isVslLike = form.type === "vsl" || form.type === "lead";
   // usaProduto: cadastra por produto, com expert/funil opcionais (upsell, downsell, obrigado)
-  const usaProduto = form.type === "upsell" || form.type === "downsell" || form.type === "obrigado";
+  const usaProduto = isOfertaType(form.type);
   // temPosicao: so upsell/downsell existem em posicao 1 e 2, com o 2 podendo seguir o 1
-  const temPosicao = form.type === "upsell" || form.type === "downsell";
+  const temPosicao = temPosicaoType(form.type);
   const TypeIcon = TYPE_ICON[form.type] || Layers;
 
   // só Upsell/Downsell 1 do MESMO funil/expert (não puxa de outro funil)
@@ -699,10 +704,10 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const Icon = TYPE_ICON[item.type];
   const isTsl = item.type === "downsell" && item.tipo === "tsl";
-  const isOferta = item.type === "upsell" || item.type === "downsell" || item.type === "obrigado";
+  const isOferta = isOfertaType(item.type);
   const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado || item.linkPagina;
   const s = STATUS[item.status];
-  const linked = item.posicao === "2" && item.associar && item.associadoId
+  const linked = temPosicaoType(item.type) && item.posicao === "2" && item.associar && item.associadoId
     ? allItems?.find((i) => i.id === item.associadoId)
     : null;
 
@@ -730,19 +735,14 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
         <div className="flex items-center gap-1.5 flex-wrap leading-tight">
           <span className="text-[13px] font-bold truncate" style={{ color: C.primary }}>{title}</span>
           {item.type === "lead" && item.versao && <Tag>V{item.versao}</Tag>}
-          {(item.type === "upsell" || item.type === "downsell") && (
-            <>
-              <Tag>V{item.versao || "?"}</Tag>
-              <Tag color={item.posicao === "2" ? C.gold : undefined}>{TYPE_LABEL[item.type]} {item.posicao || "1"}</Tag>
-            </>
-          )}
-          {item.type === "obrigado" && <Tag>V{item.versao || "?"}</Tag>}
+          {isOfertaType(item.type) && <Tag>V{item.versao || "?"}</Tag>}
+          {temPosicaoType(item.type) && <Tag color={item.posicao === "2" ? C.gold : undefined}>{TYPE_LABEL[item.type]} {item.posicao || "1"}</Tag>}
           {isTsl && <Tag>TSL — só copy</Tag>}
           {item.reaproveitada && <Tag color={C.gold}>reaproveitada da V{item.origemVersao || "?"}</Tag>}
           {linked && (
             <Tag color={C.gold}><ArrowRightLeft size={9} /> segue {linked.produto || "?"} V{linked.versao}</Tag>
           )}
-          {item.posicao === "2" && !item.associar && <Tag>avulso</Tag>}
+          {temPosicaoType(item.type) && item.posicao === "2" && !item.associar && <Tag>avulso</Tag>}
         </div>
         <p className="text-[11px] truncate mt-0.5" style={{ color: C.dim }}>
           {who}
@@ -914,7 +914,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
   };
 
   const vslLikeAll = items.filter((i) => (i.type === "vsl" || i.type === "lead") && matchesFilters(i));
-  const reusableAll = items.filter((i) => (i.type === "upsell" || i.type === "downsell" || i.type === "obrigado") && matchesFilters(i));
+  const reusableAll = items.filter((i) => isOfertaType(i.type) && matchesFilters(i));
 
   const selectStyle = {
     background: "rgba(255,255,255,0.03)",
@@ -937,7 +937,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           const funilItems = expertItems.filter((i) => i.funilId === f.id);
           const corpoItems = funilItems.filter((i) => i.type === "vsl").sort((a, b) => (b.versao || "").localeCompare(a.versao || ""));
           const leadItems = funilItems.filter((i) => i.type === "lead").sort((a, b) => (b.versao || "").localeCompare(a.versao || "") || (a.leadNum || "").localeCompare(b.leadNum || ""));
-          // upsell/downsell vinculados a este funil
+          // upsell/downsell/obrigado vinculados a este funil
           const upsellItems = reusableAll.filter((i) => i.type === "upsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
           const downsellItems = reusableAll.filter((i) => i.type === "downsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
           const obrigadoItems = reusableAll.filter((i) => i.type === "obrigado" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.produto || "").localeCompare(b.produto || ""));
@@ -1017,7 +1017,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           </div>
           <TypeBlock title="Upsell" Icon={ArrowUpCircle} items={reusableAll.filter((i) => i.type === "upsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum upsell cadastrado ainda" />
           <TypeBlock title="Downsell" Icon={ArrowDownCircle} items={reusableAll.filter((i) => i.type === "downsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum downsell cadastrado ainda" />
-          <TypeBlock title="Obrigado" Icon={Sparkles} items={reusableAll.filter((i) => i.type === "obrigado")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma pagina de obrigado cadastrada ainda" />
+          <TypeBlock title="Obrigado" Icon={Sparkles} items={reusableAll.filter((i) => i.type === "obrigado")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma página de obrigado cadastrada ainda" />
         </>
       ) : (
         <>
@@ -1077,12 +1077,15 @@ function PaginaField({ item, onSetPagina }) {
   );
 }
 
-function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, onChange, onRename, autoLabel, onSetPagina }) {
+function SlotPicker({ label, num, slotKey, funilId, current, eligible, all, multi, onChange, onRename, autoLabel, onSetPagina }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(label);
   const currentIds = multi ? (current || []) : current ? [current] : [];
-  const selectedItems = eligible.filter((it) => currentIds.includes(it.id));
+  // resolvido a partir da lista COMPLETA (nao a de elegiveis): um slot ja salvo pode
+  // apontar pra um item que as regras de elegibilidade atuais excluiriam hoje
+  // (outro expert, duplicado noutro card do mesmo funil, ou status voltou pra em_edicao)
+  const selectedItems = currentIds.map((id) => (all || eligible).find((it) => it.id === id)).filter(Boolean);
 
   const toggle = (id) => {
     if (multi) {
@@ -1234,7 +1237,7 @@ function slotLabels(slots) {
     counts[s.kind] = (counts[s.kind] || 0) + 1;
     if (s.kind === "corpo") return "Corpo VSL";
     if (s.kind === "lead") return totals.lead > 1 ? `Lead ${counts.lead}` : "Lead";
-    return `${SLOT_KIND[s.kind].base} ${counts[s.kind]}`;
+    return `${SLOT_KIND[s.kind]?.base || s.kind} ${counts[s.kind]}`;
   });
 }
 
@@ -1418,13 +1421,15 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
               const eligibleFor = (slot) => {
                 const used = usedElsewhere(slot.id);
                 const livre = (i) => !used.has(i.id);
-                // upsell/downsell: só do expert deste funil (ou os da biblioteca, sem expert definido)
+                // upsell/downsell/obrigado: só do expert deste funil (ou os da biblioteca, sem expert definido)
                 const doExpert = (i) => !i.expertId || i.expertId === ex.id;
                 if (slot.kind === "lead") return editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id && livre(i));
                 if (slot.kind === "corpo") return editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id && livre(i));
                 if (slot.kind === "upsell") return editado.filter((i) => i.type === "upsell" && doExpert(i) && livre(i));
                 if (slot.kind === "downsell") return editado.filter((i) => i.type === "downsell" && doExpert(i) && livre(i));
-                return editado.filter((i) => i.type === "obrigado" && doExpert(i) && livre(i));
+                if (slot.kind === "obrigado") return editado.filter((i) => i.type === "obrigado" && doExpert(i) && livre(i));
+                // tipo de card desconhecido (ex: bundle antigo com um kind mais novo do que este build conhece)
+                return [];
               };
               const filledCount = slots.filter((s) => (s.kind === "lead" ? (s.value || []).length > 0 : !!s.value)).length;
               return (
@@ -1439,7 +1444,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                   <div className="flex items-stretch gap-1.5 flex-wrap">
                     {slots.map((s, i) => (
                       <div key={s.id} className="flex-1 min-w-[150px] flex flex-col gap-1">
-                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
+                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s)} all={items} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
                         <div className="flex items-center justify-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
                           <button onClick={() => moveSlot(f.id, s.id, -1)} disabled={i === 0} title="Mover para a esquerda" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={12} color={C.text} /></button>
                           <button onClick={() => removeSlot(f.id, s.id)} title="Remover card" className="p-1 rounded-md hover:bg-white/10"><Trash2 size={11} color={C.text} /></button>
@@ -1457,7 +1462,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                         className="flex items-center gap-1 text-[10.5px] font-semibold px-2.5 py-1 rounded-full"
                         style={{ background: "rgba(255,255,255,0.03)", color: C.text, border: "1px dashed rgba(255,255,255,0.15)" }}
                       >
-                        <Plus size={10} /> {SLOT_KIND[k].base}
+                        <Plus size={10} /> {SLOT_KIND[k]?.base || k}
                       </button>
                     ))}
                   </div>
@@ -1965,7 +1970,7 @@ function DashboardTab({ items, experts, tests, funilState, onGo, onAdd }) {
               <Plus size={15} color={C.accent} />
               <span className="text-[13px] font-bold" style={{ color: C.accent }}>Cadastrar material</span>
             </div>
-            <p className="text-[11px]" style={{ color: C.text }}>Adicione uma Lead, Corpo, Upsell ou Downsell à produção.</p>
+            <p className="text-[11px]" style={{ color: C.text }}>Adicione uma Lead, Corpo, Upsell, Downsell ou Obrigado à produção.</p>
           </button>
         </div>
       </div>
