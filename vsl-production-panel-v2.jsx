@@ -458,7 +458,10 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const expert = experts.find((e) => e.id === form.expertId);
   const isVslLike = form.type === "vsl" || form.type === "lead";
-  const isReusable = form.type === "upsell" || form.type === "downsell";
+  // usaProduto: cadastra por produto, com expert/funil opcionais (upsell, downsell, obrigado)
+  const usaProduto = form.type === "upsell" || form.type === "downsell" || form.type === "obrigado";
+  // temPosicao: so upsell/downsell existem em posicao 1 e 2, com o 2 podendo seguir o 1
+  const temPosicao = form.type === "upsell" || form.type === "downsell";
   const TypeIcon = TYPE_ICON[form.type] || Layers;
 
   // só Upsell/Downsell 1 do MESMO funil/expert (não puxa de outro funil)
@@ -484,7 +487,7 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
         <div className="px-5 pb-5 pt-4">
           <Section label="Tipo">
             <div className="flex items-center gap-1.5 flex-wrap">
-              {["vsl", "lead", "upsell", "downsell"].map((t) => {
+              {["vsl", "lead", "upsell", "downsell", "obrigado"].map((t) => {
                 const Icon = TYPE_ICON[t];
                 const active = form.type === t;
                 return (
@@ -537,7 +540,7 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
                   </Field>
                 </div>
                 <p className="text-[10px] mt-1" style={{ color: "#5C5C5C" }}>
-                  Vincule a um funil para o upsell/downsell aparecer dentro dele. Fica na biblioteca de qualquer forma e pode ser usado em outros funis.
+                  Vincule a um funil para este item aparecer dentro dele. Fica na biblioteca de qualquer forma e pode ser usado em outros funis.
                 </p>
               </>
             )}
@@ -567,7 +570,7 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
               </>
             )}
 
-            {isReusable && (
+            {temPosicao && (
               <div className="mt-3">
                 <span className="block text-[10.5px] font-bold uppercase tracking-wide mb-1.5" style={{ color: "#5C5C5C" }}>Posição</span>
                 <div className="flex items-center gap-1.5 mb-3">
@@ -608,7 +611,11 @@ function ItemModal({ initial, experts, items, onSave, onClose }) {
                     )}
                   </div>
                 )}
+              </div>
+            )}
 
+            {usaProduto && (
+              <div className="mt-3">
                 <Field label="Contexto da oferta (opcional)">
                   <input style={inputStyle} value={form.contexto || ""} onChange={set("contexto")} placeholder='ex: "agradece a compra da Aiva Pro"' />
                 </Field>
