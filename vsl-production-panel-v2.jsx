@@ -748,7 +748,7 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
           {who}
           {dates && <span> · {dates}</span>}
           {isOferta && item.contexto && (
-            <span className="italic" title={item.contexto}> · "{item.contexto}"</span>
+            <span className="italic" title={item.contexto}> · “{item.contexto}”</span>
           )}
         </p>
       </div>
