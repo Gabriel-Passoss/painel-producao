@@ -60,10 +60,9 @@ function officialName(item, items, experts) {
   if (item.type === "vsl") {
     return `VSL_${funil}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
   }
-  // Lead: VSL_[FUNIL]_V[versão]_LEAD[nº]_[EDITOR LEAD]-[COPY LEAD]_[EDITOR CORPO]-[COPY CORPO]
-  const corpo = items.find((i) => i.type === "vsl" && i.funilId === item.funilId && i.versao === item.versao);
-  const base = `VSL_${funil}_V${item.versao || "?"}_LEAD${item.leadNum || "?"}_${pair(item.editor, item.copy)}`;
-  return corpo ? `${base}_${pair(corpo.editor, corpo.copy)}` : base;
+  // Lead: VSL_[FUNIL]_V[versão]_LEAD[nº]_[EDITOR LEAD]-[COPY LEAD]
+  // (só quem fez a lead — o editor/copy do corpo não entra no nome)
+  return `VSL_${funil}_V${item.versao || "?"}_LEAD${item.leadNum || "?"}_${pair(item.editor, item.copy)}`;
 }
 
 /* Rótulo curto de um item para histórico/testes */
@@ -936,7 +935,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
                 <p className="text-[14px] font-bold" style={{ color: C.primary }}>Funil {f.name}</p>
                 <span className="text-[10.5px]" style={{ color: C.dim }}>{total} {total === 1 ? "item" : "itens"}</span>
               </div>
-              <TypeBlock title="Leads" Icon={Zap} items={leadItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma lead cadastrada ainda" groupLabel={(it) => `Corpo V${it.versao || "?"}`} />
+              <TypeBlock title="Leads" Icon={Zap} items={leadItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma lead cadastrada ainda" groupLabel={(it) => `Leads V${it.versao || "?"}`} />
               <TypeBlock title="Corpo VSL" Icon={Film} items={corpoItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum corpo cadastrado ainda" />
               {upsellItems.length > 0 && (
                 <TypeBlock title="Upsell" Icon={ArrowUpCircle} items={upsellItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} />
@@ -1135,7 +1134,7 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
             <div key={it.id} className="px-2 py-1.5 rounded-lg" style={{ background: C.accentSoft, color: C.primary }}>
               <div className="flex items-center justify-between text-[11.5px]">
                 <span className="truncate">
-                  {it.type === "lead" ? `Lead #${it.leadNum}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
+                  {it.type === "lead" ? `Lead #${it.leadNum} V${it.versao || "?"}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
                 </span>
                 <span className="flex items-center gap-1.5 ml-1 shrink-0">
                   {it.linkBruto && (
@@ -1171,7 +1170,7 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, multi, on
               style={{ background: currentIds.includes(it.id) ? C.accentSoft : "transparent", color: currentIds.includes(it.id) ? C.accent : C.text }}
             >
               <span className="truncate">
-                {it.type === "lead" ? `Lead #${it.leadNum} (${it.editor})` : it.produto ? `${it.produto} V${it.versao} (${it.editor || it.copy})` : `V${it.versao} (${it.editor})`}
+                {it.type === "lead" ? `Lead #${it.leadNum} V${it.versao || "?"} (${it.editor})` : it.produto ? `${it.produto} V${it.versao} (${it.editor || it.copy})` : `V${it.versao} (${it.editor})`}
               </span>
               {currentIds.includes(it.id) && <CheckCircle2 size={12} />}
             </button>
@@ -1386,11 +1385,25 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
             {ex.funis.map((f) => {
               const slots = getSlots(f.id);
               const labels = slotLabels(slots);
-              const eligibleFor = (kind) => {
-                if (kind === "lead") return editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id);
-                if (kind === "corpo") return editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id);
-                if (kind === "upsell") return editado.filter((i) => i.type === "upsell");
-                return editado.filter((i) => i.type === "downsell");
+              // ids já usados nos OUTROS cards deste funil — um produto não se repete no mesmo funil
+              const usedElsewhere = (slotId) => {
+                const set = new Set();
+                slots.forEach((s) => {
+                  if (s.id === slotId) return;
+                  if (s.kind === "lead") (s.value || []).forEach((v) => v && set.add(v));
+                  else if (s.value) set.add(s.value);
+                });
+                return set;
+              };
+              const eligibleFor = (slot) => {
+                const used = usedElsewhere(slot.id);
+                const livre = (i) => !used.has(i.id);
+                // upsell/downsell: só do expert deste funil (ou os da biblioteca, sem expert definido)
+                const doExpert = (i) => !i.expertId || i.expertId === ex.id;
+                if (slot.kind === "lead") return editado.filter((i) => i.type === "lead" && i.expertId === ex.id && i.funilId === f.id && livre(i));
+                if (slot.kind === "corpo") return editado.filter((i) => i.type === "vsl" && i.expertId === ex.id && i.funilId === f.id && livre(i));
+                if (slot.kind === "upsell") return editado.filter((i) => i.type === "upsell" && doExpert(i) && livre(i));
+                return editado.filter((i) => i.type === "downsell" && doExpert(i) && livre(i));
               };
               const filledCount = slots.filter((s) => (s.kind === "lead" ? (s.value || []).length > 0 : !!s.value)).length;
               return (
@@ -1405,7 +1418,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                   <div className="flex items-stretch gap-1.5 flex-wrap">
                     {slots.map((s, i) => (
                       <div key={s.id} className="flex-1 min-w-[150px] flex flex-col gap-1">
-                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s.kind)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
+                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s)} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
                         <div className="flex items-center justify-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
                           <button onClick={() => moveSlot(f.id, s.id, -1)} disabled={i === 0} title="Mover para a esquerda" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={12} color={C.text} /></button>
                           <button onClick={() => removeSlot(f.id, s.id)} title="Remover card" className="p-1 rounded-md hover:bg-white/10"><Trash2 size={11} color={C.text} /></button>
