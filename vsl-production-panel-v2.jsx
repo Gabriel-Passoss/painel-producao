@@ -699,6 +699,7 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const Icon = TYPE_ICON[item.type];
   const isTsl = item.type === "downsell" && item.tipo === "tsl";
+  const isOferta = item.type === "upsell" || item.type === "downsell" || item.type === "obrigado";
   const hasLinks = item.linkBruto || item.linkCopy || item.linkEditado || item.linkPagina;
   const s = STATUS[item.status];
   const linked = item.posicao === "2" && item.associar && item.associadoId
@@ -735,6 +736,7 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
               <Tag color={item.posicao === "2" ? C.gold : undefined}>{TYPE_LABEL[item.type]} {item.posicao || "1"}</Tag>
             </>
           )}
+          {item.type === "obrigado" && <Tag>V{item.versao || "?"}</Tag>}
           {isTsl && <Tag>TSL — só copy</Tag>}
           {item.reaproveitada && <Tag color={C.gold}>reaproveitada da V{item.origemVersao || "?"}</Tag>}
           {linked && (
@@ -745,8 +747,8 @@ function ItemCard({ item, allItems, experts, onEdit, onDelete }) {
         <p className="text-[11px] truncate mt-0.5" style={{ color: C.dim }}>
           {who}
           {dates && <span> · {dates}</span>}
-          {(item.type === "upsell" || item.type === "downsell") && item.contexto && (
-            <span className="italic" title={item.contexto}> · “{item.contexto}”</span>
+          {isOferta && item.contexto && (
+            <span className="italic" title={item.contexto}> · "{item.contexto}"</span>
           )}
         </p>
       </div>
