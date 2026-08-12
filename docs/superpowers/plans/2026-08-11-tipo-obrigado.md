@@ -534,56 +534,165 @@ git commit -m "Obrigado: card proprio na aba Funil Atual"
 
 ---
 
-### Task 6: Verificação visual no painel rodando
+### Task 6: Verificação funcional headless (jsdom)
 
 **Files:**
-- Nenhum arquivo é modificado se tudo passar. Qualquer defeito encontrado vira correção na task correspondente (1 a 5), com rebuild e commit próprio.
+- Create: `$BUILD/smoke.mjs` (fora do repositório — arquivo de verificação descartável, não é commitado)
+- Nenhum arquivo do repositório é modificado se tudo passar. Defeito encontrado vira correção na task de origem (1 a 5), com rebuild e commit próprio.
 
 **Interfaces:**
 - Consumes: tudo das Tasks 1 a 5.
 - Produces: confirmação de que o tipo funciona ponta a ponta.
 
-- [ ] **Step 1: Subir o painel local**
+**Por que headless e não no painel rodando:** o painel local fala com o Supabase compartilhado da equipe, e criar itens de teste lá deixaria lixo visível para todo mundo. A camada de storage (`vsl-production-panel-v2.jsx:120-150`) cai em `localStorage` quando não há `window.SUPABASE_URL` e o `/api/health` falha — que é exatamente o que acontece em jsdom. Assim dá para renderizar o painel de verdade, com dados semeados, sem encostar na base compartilhada.
+
+- [ ] **Step 1: Instalar o jsdom no diretório de build**
 
 ```bash
-cd painel-online && PORT=3777 node server.js
+BUILD=/private/tmp/claude-501/-Users-gabrieldospassos-Documents-www-painel-producao/37c4c2b9-d61d-497a-b06b-5adf0c53ac96/scratchpad/build
+cd "$BUILD" && npm i --no-audit --no-fund jsdom@25
 ```
 
-Abrir `http://localhost:3777`. **Atenção:** este painel usa o Supabase compartilhado da equipe — o que for salvo vale para todo mundo. Combine com o dono do projeto antes de criar itens de teste, ou apague-os no fim.
+- [ ] **Step 2: Escrever o smoke test**
 
-- [ ] **Step 2: Conferir o formulário**
+Criar `$BUILD/smoke.mjs`. Ele semeia o `localStorage` com um expert, um funil, um corpo, uma lead e **duas** páginas de obrigado (uma do expert certo e uma de outro expert, para provar o filtro), renderiza o painel e faz asserções sobre o DOM.
 
-Clicar em "+ Novo material" → botão **Obrigado**. Confirmar, na ordem:
+```js
+import { JSDOM } from "jsdom";
+import fs from "node:fs";
 
-1. Aparecem: Produto, Expert (opcional), Funil (opcional), Versão, Contexto (opcional).
-2. **Não** aparecem: Posição 1/2, o bloco "Associar a um ... 1?", nem o campo Formato (vídeo/TSL).
-3. Editor, Copy, Status, datas e os 4 links estão presentes, iguais aos dos outros tipos.
-4. Preenchendo Produto `Carteira Black`, Versão `1`, Editor `THI`, Copy `LUC`, a seção "Nomenclatura oficial" mostra `OBRIGADO_CARTEIRABLACK_V1_THI-LUC`.
+const bundle = fs.readFileSync(process.argv[2], "utf8");
 
-- [ ] **Step 3: Conferir a aba Produção**
+// chaves reais do painel (vsl-production-panel-v2.jsx:1970-1975)
+const dados = {
+  "vslpanel:experts": [
+    { id: "ex1", name: "Ronald", funis: [{ id: "f1", name: "HFTC" }] },
+    { id: "ex2", name: "Jhon", funis: [{ id: "f2", name: "Atmoz" }] },
+  ],
+  "vslpanel:items": [
+    { id: "i1", type: "vsl", expertId: "ex1", funilId: "f1", versao: "1", editor: "THI", copy: "WEND", status: "editado" },
+    { id: "i2", type: "lead", expertId: "ex1", funilId: "f1", versao: "1", leadNum: "01", editor: "THI", copy: "WEND", status: "editado" },
+    { id: "i3", type: "obrigado", expertId: "ex1", funilId: "f1", produto: "Carteira Black", versao: "1", editor: "THI", copy: "LUC", status: "editado", contexto: "agradece a compra" },
+    { id: "i4", type: "obrigado", expertId: "ex2", funilId: "f2", produto: "Atmoz PRO", versao: "1", editor: "SEL", copy: "LUC", status: "editado" },
+  ],
+  "vslpanel:funilstate": {},
+  "vslpanel:slotlog": [],
+  "vslpanel:tests": [],
+  "vslpanel:notifications": [],
+};
 
-Salvar o item com Expert e Funil preenchidos e status **Editado**. Confirmar:
+const dom = new JSDOM(`<!doctype html><html><body><div id="root"></div></body></html>`, {
+  url: "http://localhost/",
+  runScripts: "outside-only",
+  pretendToBeVisual: true,
+});
 
-1. Ele aparece no bloco **Obrigado** dentro daquele funil, com a tag `V1` e sem tag de posição.
-2. O contador de itens do funil subiu em 1.
-3. O select de tipo tem a opção **Obrigado** e, escolhendo-a, só os itens desse tipo continuam na tela.
-4. Na visão Geral, ele aparece na "Biblioteca de Upsell, Downsell & Obrigado".
+// storage: sem Supabase e sem /api -> o painel cai no localStorage
+dom.window.SUPABASE_URL = "";
+dom.window.SUPABASE_KEY = "";
+dom.window.fetch = () => Promise.reject(new Error("sem rede no smoke test"));
+for (const [k, v] of Object.entries(dados)) {
+  dom.window.localStorage.setItem(k, JSON.stringify(v));
+}
 
-- [ ] **Step 4: Conferir a aba Funil Atual**
+dom.window.eval(bundle);
 
-1. Na linha "ADICIONAR CARD" do funil daquele expert existe o botão **+ Obrigado**; clicar cria um card chamado "Obrigado 1".
-2. Clicar em "trocar" lista o item recém-criado — e **não** lista páginas de obrigado de outro expert.
-3. Depois de vincular, criar um segundo card "+ Obrigado" e confirmar que o item já usado **não** aparece na lista dele.
-4. O card entra no contador "x/y no ar" e a troca fica registrada em "Registro de alterações".
-5. O lápis do card renomeia para "Pág. Obrigado" e o nome persiste.
+const falhas = [];
+const ok = (nome, cond) => {
+  console.log((cond ? "OK   " : "FALHA") + "  " + nome);
+  if (!cond) falhas.push(nome);
+};
+const txt = () => dom.window.document.body.textContent;
+const botao = (rotulo) =>
+  [...dom.window.document.querySelectorAll("button")].find((b) => b.textContent.trim() === rotulo);
+const clicar = (el) => el.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+const esperar = () => new Promise((r) => setTimeout(r, 60));
 
-- [ ] **Step 5: Conferir que nada quebrou nos tipos antigos**
+await esperar();
 
-1. Novo item → **Upsell**: Posição 1/2 e o bloco de associação continuam lá; Contexto também.
-2. Novo item → **Downsell**: o campo Formato (vídeo/TSL) continua lá; escolhendo TSL, o campo Editor some, como antes.
-3. Novo item → **Corpo VSL** e **Lead**: continuam pedindo Expert e Funil obrigatórios, sem campo de Produto.
-4. As abas Dashboard e Testes abrem sem erro no console do navegador.
+// --- 1. o painel renderiza e leu os dados semeados
+ok("painel renderiza sem erro", txt().includes("Ronald"));
 
-- [ ] **Step 6: Limpar e encerrar**
+// --- 2. modal: botao Obrigado e formulario enxuto
+clicar(botao("Novo material"));
+await esperar();
+ok("modal tem o botao Obrigado", !!botao("Obrigado"));
+clicar(botao("Obrigado"));
+await esperar();
+const modal = txt();
+ok("mostra o campo Produto", modal.includes("Produto"));
+ok("mostra Expert/Funil opcionais", modal.includes("Expert do funil (opcional)"));
+ok("mostra Contexto da oferta", modal.includes("Contexto da oferta (opcional)"));
+ok("NAO mostra Posicao", !modal.includes("Posição"));
+ok("NAO mostra Formato (video/TSL)", !modal.includes("Formato"));
+ok("nomenclatura comeca com OBRIGADO_", modal.includes("OBRIGADO_"));
+clicar([...dom.window.document.querySelectorAll("button")].at(-1)); // fecha o modal pelo X mais proximo
+await esperar();
 
-Apagar os itens de teste criados, parar o servidor local e reportar o resultado. Se algum passo falhou, corrigir na task de origem, recompilar e commitar antes de dar a implementação por concluída.
+// --- 3. aba Producao: bloco Obrigado dentro do funil
+clicar(botao("Produção"));
+await esperar();
+ok("aba Producao abre", txt().includes("Funil HFTC") || txt().includes("HFTC"));
+ok("lista a pagina de obrigado do funil", txt().includes("Carteira Black"));
+
+// --- 4. aba Funil Atual: botao + Obrigado e filtro por expert
+clicar(botao("Funil Atual"));
+await esperar();
+ok("existe o botao + Obrigado", !!botao("Obrigado"));
+clicar(botao("Obrigado"));
+await esperar();
+ok("card Obrigado 1 criado", txt().includes("Obrigado 1"));
+
+const trocares = [...dom.window.document.querySelectorAll("button")].filter((b) => b.textContent.includes("trocar"));
+clicar(trocares.at(-1));
+await esperar();
+const lista = txt();
+ok("picker oferece a pagina do expert certo", lista.includes("Carteira Black"));
+ok("picker NAO oferece a de outro expert", !lista.includes("Atmoz PRO"));
+
+console.log(falhas.length ? "\n" + falhas.length + " FALHA(S): " + falhas.join(" | ") : "\ntudo passou");
+process.exit(falhas.length ? 1 : 0);
+```
+
+As chaves acima são as reais, conferidas em `vsl-production-panel-v2.jsx:1970-1975`. O `useStorage` lê `localStorage.getItem(key)`, embrulha em `{ value }` e faz `JSON.parse` — por isso cada chave recebe o JSON já serializado.
+
+- [ ] **Step 3: Rodar o smoke test**
+
+```bash
+BUILD=/private/tmp/claude-501/-Users-gabrieldospassos-Documents-www-painel-producao/37c4c2b9-d61d-497a-b06b-5adf0c53ac96/scratchpad/build
+node "$BUILD/smoke.mjs" /Users/gabrieldospassos/Documents/www/painel-producao/painel-online/public/bundle.js
+```
+
+Esperado: todas as linhas `OK`, a mensagem `tudo passou` e saída 0.
+
+Se alguma asserção falhar, **investigar antes de mexer no teste**: pode ser um defeito real do código (corrigir na task de origem, recompilar, commitar) ou uma asserção mal escrita (o `textContent` do painel é denso e pode dar falso negativo). Nunca afrouxar uma asserção sem antes confirmar, lendo o código, que o comportamento está certo.
+
+- [ ] **Step 4: Conferir que os tipos antigos não quebraram**
+
+Reabrir o modal no mesmo smoke test, agora nos tipos antigos. Acrescentar ao fim de `smoke.mjs`, antes do relatório final:
+
+```js
+// --- 5. regressao: os 4 tipos antigos continuam iguais
+clicar(botao("Novo material"));
+await esperar();
+clicar(botao("Upsell"));
+await esperar();
+ok("Upsell mantem Posicao", txt().includes("Posição"));
+ok("Upsell mantem Contexto", txt().includes("Contexto da oferta (opcional)"));
+clicar(botao("Downsell"));
+await esperar();
+ok("Downsell mantem Formato", txt().includes("Formato"));
+clicar(botao("Corpo VSL"));
+await esperar();
+ok("Corpo VSL nao pede Produto", !txt().includes("Contexto da oferta (opcional)"));
+```
+
+Rodar de novo e esperar todas as linhas `OK`.
+
+- [ ] **Step 5: Reportar**
+
+O smoke test vive fora do repositório e não é commitado — não há suíte de testes aqui e criar uma sozinha, sem combinar, sairia do escopo. Reportar ao dono do projeto:
+
+1. O resultado de cada asserção.
+2. Que a verificação foi headless, em `localStorage`, **sem tocar no Supabase compartilhado**.
+3. A lista de conferência visual que sobra para ele fazer no painel quando quiser: aparência do botão novo na linha de tipos (são 5 botões agora e a linha quebra em duas), o ícone `Sparkles` no lugar certo, e o card de Obrigado no meio dos outros no Funil Atual.
