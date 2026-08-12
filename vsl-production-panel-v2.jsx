@@ -33,8 +33,8 @@ const STATUS = {
 };
 const STATUS_ORDER = ["a_editar", "em_edicao", "editado"];
 
-const TYPE_LABEL = { vsl: "Corpo VSL", lead: "Lead", upsell: "Upsell", downsell: "Downsell" };
-const TYPE_ICON = { vsl: Film, lead: Zap, upsell: ArrowUpCircle, downsell: ArrowDownCircle };
+const TYPE_LABEL = { vsl: "Corpo VSL", lead: "Lead", upsell: "Upsell", downsell: "Downsell", obrigado: "Obrigado" };
+const TYPE_ICON = { vsl: Film, lead: Zap, upsell: ArrowUpCircle, downsell: ArrowDownCircle, obrigado: Sparkles };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -52,6 +52,10 @@ function funilName(experts, funilId) {
 
 function officialName(item, items, experts) {
   const pair = (ed, cp) => [abbr3(ed), abbr3(cp)].filter(Boolean).join("-") || "?";
+  if (item.type === "obrigado") {
+    // pagina de obrigado nao tem posicao 1/2, entao o nome vai direto para o produto
+    return `OBRIGADO_${slug(item.produto) || "PRODUTO"}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
+  }
   if (item.type === "upsell" || item.type === "downsell") {
     // inclui a posição (1 ou 2) para saber qual upsell/downsell é: UPSELL1_..., DOWNSELL2_...
     return `${item.type.toUpperCase()}${item.posicao || "1"}_${slug(item.produto) || "PRODUTO"}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
