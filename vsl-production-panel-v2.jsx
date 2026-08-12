@@ -914,7 +914,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
   };
 
   const vslLikeAll = items.filter((i) => (i.type === "vsl" || i.type === "lead") && matchesFilters(i));
-  const reusableAll = items.filter((i) => (i.type === "upsell" || i.type === "downsell") && matchesFilters(i));
+  const reusableAll = items.filter((i) => (i.type === "upsell" || i.type === "downsell" || i.type === "obrigado") && matchesFilters(i));
 
   const selectStyle = {
     background: "rgba(255,255,255,0.03)",
@@ -940,7 +940,8 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           // upsell/downsell vinculados a este funil
           const upsellItems = reusableAll.filter((i) => i.type === "upsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
           const downsellItems = reusableAll.filter((i) => i.type === "downsell" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.posicao || "1").localeCompare(b.posicao || "1"));
-          const total = funilItems.length + upsellItems.length + downsellItems.length;
+          const obrigadoItems = reusableAll.filter((i) => i.type === "obrigado" && i.expertId === ex.id && i.funilId === f.id).sort((a, b) => (a.produto || "").localeCompare(b.produto || ""));
+          const total = funilItems.length + upsellItems.length + downsellItems.length + obrigadoItems.length;
           return (
             <div key={f.id} className="rounded-2xl p-4 mb-4" style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${C.cardBorder}` }}>
               <div className="flex items-center gap-2 mb-3">
@@ -955,6 +956,9 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
               )}
               {downsellItems.length > 0 && (
                 <TypeBlock title="Downsell" Icon={ArrowDownCircle} items={downsellItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} />
+              )}
+              {obrigadoItems.length > 0 && (
+                <TypeBlock title="Obrigado" Icon={Sparkles} items={obrigadoItems} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} />
               )}
             </div>
           );
@@ -989,6 +993,7 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           <option value="lead">Lead</option>
           <option value="upsell">Upsell</option>
           <option value="downsell">Downsell</option>
+          <option value="obrigado">Obrigado</option>
         </select>
       </div>
 
@@ -1007,11 +1012,12 @@ function ProducaoTab({ items, experts, globalSearch, onAdd, onEdit, onDelete, on
           </div>
           <div className="flex items-center gap-2 mb-2 mt-2">
             <span className="w-1 h-4 rounded-full" style={{ background: C.gold }} />
-            <h4 className="text-[13.5px] font-bold" style={{ color: C.primary }}>Biblioteca de Upsell & Downsell</h4>
+            <h4 className="text-[13.5px] font-bold" style={{ color: C.primary }}>Biblioteca de Upsell, Downsell & Obrigado</h4>
             <span className="text-[10.5px]" style={{ color: C.dim }}>compartilhada entre todos os experts</span>
           </div>
           <TypeBlock title="Upsell" Icon={ArrowUpCircle} items={reusableAll.filter((i) => i.type === "upsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum upsell cadastrado ainda" />
           <TypeBlock title="Downsell" Icon={ArrowDownCircle} items={reusableAll.filter((i) => i.type === "downsell")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhum downsell cadastrado ainda" />
+          <TypeBlock title="Obrigado" Icon={Sparkles} items={reusableAll.filter((i) => i.type === "obrigado")} allItems={items} experts={experts} onEdit={onEdit} onDelete={onDelete} emptyText="nenhuma pagina de obrigado cadastrada ainda" />
         </>
       ) : (
         <>
