@@ -69,9 +69,10 @@ function officialName(item, items, experts) {
   if (item.type === "vsl") {
     return `VSL_${funil}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
   }
-  // Lead: VSL_[FUNIL]_V[versão]_LEAD[nº]_[EDITOR LEAD]-[COPY LEAD]
-  // (só quem fez a lead — o editor/copy do corpo não entra no nome)
-  return `VSL_${funil}_V${item.versao || "?"}_LEAD${item.leadNum || "?"}_${pair(item.editor, item.copy)}`;
+  // Lead: LEAD_[nº]_[FUNIL]_V[versão]_[EDITOR LEAD]-[COPY LEAD]
+  // a versão entra porque a mesma lead às vezes é regravada noutro ambiente,
+  // e é a versão que separa uma regravação da outra
+  return `LEAD_${item.leadNum || "?"}_${funil}_V${item.versao || "?"}_${pair(item.editor, item.copy)}`;
 }
 
 /* Rótulo curto de um item para histórico/testes */
@@ -1077,7 +1078,7 @@ function PaginaField({ item, onSetPagina }) {
   );
 }
 
-function SlotPicker({ label, num, slotKey, funilId, current, eligible, all, multi, onChange, onRename, autoLabel, onSetPagina }) {
+function SlotPicker({ label, num, slotKey, funilId, current, eligible, all, experts, multi, onChange, onRename, autoLabel, onSetPagina }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(label);
@@ -1155,8 +1156,8 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, all, mult
           {selectedItems.map((it) => (
             <div key={it.id} className="px-2 py-1.5 rounded-lg" style={{ background: C.accentSoft, color: C.primary }}>
               <div className="flex items-center justify-between text-[11.5px]">
-                <span className="truncate">
-                  {it.type === "lead" ? `Lead #${it.leadNum} V${it.versao || "?"}` : it.produto ? `${it.produto} V${it.versao}` : `V${it.versao}`}
+                <span className="truncate" title={officialName(it, all || [], experts || [])}>
+                  {officialName(it, all || [], experts || [])}
                 </span>
                 <span className="flex items-center gap-1.5 ml-1 shrink-0">
                   {it.linkBruto && (
@@ -1191,8 +1192,8 @@ function SlotPicker({ label, num, slotKey, funilId, current, eligible, all, mult
               className="w-full text-left text-[11.5px] px-2 py-1.5 rounded-lg mb-0.5 flex items-center justify-between"
               style={{ background: currentIds.includes(it.id) ? C.accentSoft : "transparent", color: currentIds.includes(it.id) ? C.accent : C.text }}
             >
-              <span className="truncate">
-                {it.type === "lead" ? `Lead #${it.leadNum} V${it.versao || "?"} (${it.editor})` : it.produto ? `${it.produto} V${it.versao} (${it.editor || it.copy})` : `V${it.versao} (${it.editor})`}
+              <span className="truncate" title={officialName(it, all || [], experts || [])}>
+                {officialName(it, all || [], experts || [])}
               </span>
               {currentIds.includes(it.id) && <CheckCircle2 size={12} />}
             </button>
@@ -1444,7 +1445,7 @@ function FunilAtualTab({ experts, items, funilState, setFunilState, slotLog, set
                   <div className="flex items-stretch gap-1.5 flex-wrap">
                     {slots.map((s, i) => (
                       <div key={s.id} className="flex-1 min-w-[150px] flex flex-col gap-1">
-                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s)} all={items} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
+                        <SlotPicker label={s.name || labels[i]} autoLabel={labels[i]} num={i + 1} multi={s.kind === "lead"} current={s.value} eligible={eligibleFor(s)} all={items} experts={experts} onChange={(v) => updateSlotValue(f.id, s.id, v)} onRename={(name) => updateSlotName(f.id, s.id, name, labels[i])} onSetPagina={onSetPagina} />
                         <div className="flex items-center justify-center gap-0.5 opacity-40 hover:opacity-100 transition-opacity">
                           <button onClick={() => moveSlot(f.id, s.id, -1)} disabled={i === 0} title="Mover para a esquerda" className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30"><ChevronLeft size={12} color={C.text} /></button>
                           <button onClick={() => removeSlot(f.id, s.id)} title="Remover card" className="p-1 rounded-md hover:bg-white/10"><Trash2 size={11} color={C.text} /></button>
