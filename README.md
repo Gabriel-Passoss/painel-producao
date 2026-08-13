@@ -46,3 +46,29 @@ Detalhes em [`painel-online/LEIA-ME.md`](painel-online/LEIA-ME.md).
 
 O código-fonte é o [`vsl-production-panel-v2.jsx`](vsl-production-panel-v2.jsx). Depois de editar, é
 preciso recompilar o `painel-online/public/bundle.js` (com esbuild) antes de subir de novo.
+
+### Recompilar o bundle
+
+Precisa de um `entry.jsx` que importe o painel e monte com `createRoot`:
+
+```jsx
+import React from "react";
+import { createRoot } from "react-dom/client";
+import VSLProductionPanel from "./vsl-production-panel-v2.jsx";
+
+createRoot(document.getElementById("root")).render(<VSLProductionPanel />);
+```
+
+E das dependências instaladas ao lado dele:
+
+```bash
+npm i react@19.2.8 react-dom@19.2.8 lucide-react@1.27.0
+```
+
+Depois, gera o bundle:
+
+```bash
+npx esbuild@0.24.0 entry.jsx --bundle --minify --loader:.jsx=jsx \
+  --define:process.env.NODE_ENV='"production"' \
+  --outfile=painel-online/public/bundle.js
+```
